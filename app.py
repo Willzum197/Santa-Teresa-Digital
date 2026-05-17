@@ -9,7 +9,6 @@ import tempfile
 import os
 import uuid
 import re
-import requests
 
 # ============================================
 # CONFIGURACION DE SUPABASE
@@ -27,7 +26,7 @@ def init_supabase():
 supabase = init_supabase()
 
 # ============================================
-# FUNCIONES DE SUBIDA A STORAGE (FOTOS DESDE LAPTOP)
+# FUNCIONES DE SUBIDA A STORAGE
 # ============================================
 
 def subir_imagen_storage(file, carpeta="imagenes"):
@@ -36,18 +35,15 @@ def subir_imagen_storage(file, carpeta="imagenes"):
         if file is None:
             return None
         
-        # Generar nombre único para la imagen
         extension = file.name.split(".")[-1].lower()
         nombre_archivo = f"{carpeta}/{uuid.uuid4()}.{extension}"
         
-        # Subir a Storage
         supabase.storage.from_("multimedia").upload(
             nombre_archivo,
             file.getvalue(),
             {"content-type": file.type}
         )
         
-        # Obtener URL pública
         url = supabase.storage.from_("multimedia").get_public_url(nombre_archivo)
         return url
     except Exception as e:
@@ -55,7 +51,6 @@ def subir_imagen_storage(file, carpeta="imagenes"):
         return None
 
 def extraer_video_id(url_youtube):
-    """Extrae el ID de un video de YouTube desde cualquier formato de URL"""
     if "youtu.be" in url_youtube:
         return url_youtube.split("/")[-1].split("?")[0]
     elif "watch?v=" in url_youtube:
@@ -65,41 +60,16 @@ def extraer_video_id(url_youtube):
     return url_youtube
 
 def mostrar_video_youtube(url_youtube):
-    """Muestra un video de YouTube incrustado en la app"""
     video_id = extraer_video_id(url_youtube)
     if video_id:
         st.video(f"https://www.youtube.com/embed/{video_id}")
     else:
         st.error("URL de YouTube no válida")
 
-def extraer_audio_directo(url_audio):
-    """Intenta obtener URL directa de audio desde SirenMix u otras plataformas"""
-    # Si la URL ya termina en .mp3, .wav, etc., la devuelve directamente
-    if re.search(r'\.(mp3|wav|ogg|m4a|flac)(\?|$)', url_audio, re.IGNORECASE):
-        return url_audio
-    
-    # Si es de SirenMix, intenta obtener la URL directa
-    if "sirenmix.com" in url_audio.lower():
-        # El formato típico de SirenMix para audio directo
-        if "/stream/" in url_audio or "/download/" in url_audio:
-            return url_audio
-        # Si es la página de la canción, intentamos convertir a URL directa
-        # Nota: Esto depende de cómo SirenMix maneje sus enlaces
-        if "/track/" in url_audio:
-            # Esto es un ejemplo, puede variar
-            return url_audio.replace("/track/", "/download/") + ".mp3"
-    
-    return url_audio
-
 def mostrar_musica(url_audio):
-    """Muestra música usando HTML5 audio (funciona con SirenMix y otros)"""
-    url_directa = extraer_audio_directo(url_audio)
-    
-    # Método con HTML5 - el más confiable
     html_reproductor = f"""
     <audio controls style="width: 100%;">
-        <source src="{url_directa}" type="audio/mpeg">
-        <source src="{url_directa}" type="audio/wav">
+        <source src="{url_audio}" type="audio/mpeg">
         Tu navegador no soporta el elemento de audio.
     </audio>
     """
@@ -161,12 +131,11 @@ def get_fecha_hora_venezuela():
 # FUNCIONES DE ACCESO A DATOS CON SUPABASE
 # ============================================
 
-# --- NOTICIAS (con fotos desde laptop a Storage) ---
+# --- NOTICIAS ---
 def add_noticia(titulo, categoria, contenido, imagen):
     try:
         ahora = get_fecha_hora_venezuela()
         img_url = subir_imagen_storage(imagen, "noticias") if imagen else None
-        
         data = {
             "titulo": titulo,
             "categoria": categoria,
@@ -177,8 +146,7 @@ def add_noticia(titulo, categoria, contenido, imagen):
         }
         supabase.table("noticias").insert(data).execute()
         return True
-    except Exception as e:
-        st.error(f"Error: {e}")
+    except Exception:
         return False
 
 def get_noticias(categoria=None):
@@ -198,12 +166,11 @@ def delete_noticia(id_):
     except Exception:
         return False
 
-# --- NEGOCIOS (con fotos desde laptop a Storage) ---
+# --- NEGOCIOS ---
 def add_negocio(nombre, categoria, resena, direccion, telefono, horario, imagen):
     try:
         ahora = get_fecha_hora_venezuela()
         img_url = subir_imagen_storage(imagen, "negocios") if imagen else None
-        
         data = {
             "nombre": nombre,
             "categoria": categoria,
@@ -308,7 +275,7 @@ def delete_cronica(id_):
     except Exception:
         return False
 
-# --- VIDEOS (YouTube) ---
+# --- VIDEOS ---
 def add_video(titulo, url_youtube):
     try:
         ahora = get_fecha_hora_venezuela()
@@ -337,7 +304,7 @@ def delete_video(id_):
     except Exception:
         return False
 
-# --- MUSICA (SirenMix) ---
+# --- MUSICA ---
 def add_musica(titulo, url_audio):
     try:
         ahora = get_fecha_hora_venezuela()
@@ -444,28 +411,24 @@ def delete_opinion(id_):
     except Exception:
         return False
 
-# --- PERSONAJES DEL DIA (con fotos desde laptop a Storage) ---
-def add_personaje(nombre, descripcion, logros, imagen, fecha):
+# --- PERSONAJES ---
+def add_personaje(nombre, descripcion, imagen, fecha):
     try:
         img_url = subir_imagen_storage(imagen, "personajes") if imagen else None
         data = {
             "nombre": nombre,
             "descripcion": descripcion,
-            "logros": logros,
             "imagen_url": img_url,
             "fecha": fecha,
             "activo": True
         }
-        # Desactivar personajes anteriores de la misma fecha
         existing = supabase.table("personajes").select("*").eq("fecha", fecha).eq("activo", True).execute()
         if existing.data:
             for p in existing.data:
                 supabase.table("personajes").update({"activo": False}).eq("id", p["id"]).execute()
-        
         supabase.table("personajes").insert(data).execute()
         return True
-    except Exception as e:
-        st.error(f"Error al guardar personaje: {e}")
+    except Exception:
         return False
 
 def get_personaje_dia(fecha):
@@ -491,7 +454,23 @@ def delete_personaje(id_):
     except Exception:
         return False
 
-# --- VISITAS Y CONFIGURACION ---
+# --- CONFIGURACION ---
+def get_portada_url():
+    try:
+        response = supabase.table("configuracion").select("portada_url").eq("id", 1).execute()
+        if response.data and response.data[0].get("portada_url"):
+            return response.data[0]["portada_url"]
+        return None
+    except Exception:
+        return None
+
+def save_portada_url(url):
+    try:
+        supabase.table("configuracion").update({"portada_url": url}).eq("id", 1).execute()
+        return True
+    except Exception:
+        return False
+
 def actualizar_visitas():
     try:
         response = supabase.table("visitas").select("conteo").eq("id", 1).execute()
@@ -499,21 +478,20 @@ def actualizar_visitas():
             conteo_actual = response.data[0]["conteo"]
             supabase.table("visitas").update({"conteo": conteo_actual + 1}).eq("id", 1).execute()
         else:
-            supabase.table("visitas").insert({"id": 1, "conteo": 1501}).execute()
-    except Exception as e:
-        st.warning(f"No se pudo actualizar visitas: {e}")
+            supabase.table("visitas").insert({"id": 1, "conteo": 1531}).execute()
+    except Exception:
+        pass
 
 def get_visitas():
     try:
         response = supabase.table("visitas").select("conteo").eq("id", 1).execute()
         if response.data:
             return int(response.data[0]["conteo"])
-        return 1500
+        return 1530
     except Exception:
-        return 1500
+        return 1530
 
 def get_dolar():
-    """Obtiene el valor del dólar desde Supabase"""
     try:
         response = supabase.table("configuracion").select("dolar").eq("id", 1).execute()
         if response.data and response.data[0].get("dolar"):
@@ -523,14 +501,10 @@ def get_dolar():
         return 489.55
 
 def actualizar_dolar_manual(nuevo_valor):
-    """Actualiza el valor del dólar y limpia el caché"""
     try:
         supabase.table("configuracion").update({"dolar": nuevo_valor}).eq("id", 1).execute()
-        # Limpiar caché para forzar actualización
-        st.cache_data.clear()
         return True
-    except Exception as e:
-        st.error(f"Error al actualizar dólar: {e}")
+    except Exception:
         return False
 
 def get_logo():
@@ -550,27 +524,16 @@ def save_logo(url):
         return False
 
 # ============================================
-# INICIALIZAR TABLAS Y DATOS
+# INICIALIZAR
 # ============================================
-
-def inicializar_tabla_personajes():
-    try:
-        # Verificar si la tabla existe, si no, crearla
-        supabase.table("personajes").select("count", count="exact").limit(1).execute()
-    except Exception:
-        st.warning("⚠️ La tabla 'personajes' no existe. Ejecuta el script SQL en Supabase")
-
 def inicializar_configuracion():
-    """Verifica que exista la configuración inicial"""
     try:
         response = supabase.table("configuracion").select("*").eq("id", 1).execute()
         if not response.data:
-            supabase.table("configuracion").insert({"id": 1, "dolar": 489.55, "logo_url": None}).execute()
+            supabase.table("configuracion").insert({"id": 1, "dolar": 489.55, "logo_url": None, "portada_url": None}).execute()
     except Exception:
         pass
 
-# Inicializar
-inicializar_tabla_personajes()
 inicializar_configuracion()
 
 if 'visitante_contado' not in st.session_state:
@@ -578,7 +541,7 @@ if 'visitante_contado' not in st.session_state:
     st.session_state.visitante_contado = True
 
 # ============================================
-# ESTILOS PRINCIPALES
+# ESTILOS - LETRAS VISIBLES
 # ============================================
 st.markdown("""
 <style>
@@ -587,7 +550,7 @@ st.markdown("""
     background: linear-gradient(180deg, #FFD700 0%, #00247D 50%, #CF142B 100%);
 }
 
-/* Estrellas CENTRADAS */
+/* Estrellas de fondo */
 .stApp::before {
     content: "★ ★ ★ ★ ★ ★ ★ ★";
     position: fixed;
@@ -597,44 +560,59 @@ st.markdown("""
     transform: translateY(-50%);
     text-align: center;
     font-size: 120px;
-    color: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.08);
     pointer-events: none;
     z-index: 0;
     letter-spacing: 30px;
     white-space: nowrap;
 }
 
-/* Contenido principal - fondo MUY OSCURO */
-.main > div {
-    background-color: #0a0a0a !important;
+/* Contenido principal con fondo oscuro para contraste */
+.block-container {
+    background-color: rgba(0, 0, 0, 0.85) !important;
     border-radius: 20px !important;
-    padding: 25px !important;
-    margin: 15px 0 !important;
-    z-index: 2 !important;
-    position: relative !important;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.5) !important;
+    padding: 20px !important;
+    z-index: 1 !important;
 }
 
-/* TODO EL TEXTO EN BLANCO */
-.main, 
-.main p, 
-.main span, 
-.main div, 
-.main label, 
-.stMarkdown {
+/* TEXTO BLANCO PARA TODO */
+.main, .main p, .main span, .main div, .main label, .stMarkdown, .stMarkdown p {
     color: #FFFFFF !important;
-    background-color: transparent !important;
+    font-weight: 500 !important;
 }
 
-/* Títulos en dorado */
-.main h1, 
-.main h2, 
-.main h3, 
-.main h4,
-h1, h2, h3, h4 {
+/* Títulos en dorado brillante */
+.main h1, .main h2, .main h3, .main h4, h1, h2, h3, h4 {
     color: #FFD700 !important;
     font-weight: bold !important;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.8) !important;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5) !important;
+}
+
+/* Pestañas (Tabs) */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px !important;
+    background-color: #1a1a1a !important;
+    border-radius: 15px !important;
+    padding: 8px !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+    background-color: #2a2a2a !important;
+    border-radius: 12px !important;
+    color: #FFD700 !important;
+    font-weight: bold !important;
+    font-size: 16px !important;
+    padding: 10px 20px !important;
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+    background-color: #3a3a3a !important;
+    color: #FFFFFF !important;
+}
+
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, #FFD700, #CF142B) !important;
+    color: white !important;
 }
 
 /* Expanders */
@@ -643,6 +621,7 @@ h1, h2, h3, h4 {
     border-radius: 10px !important;
     border-left: 4px solid #FFD700 !important;
     color: #FFD700 !important;
+    font-weight: bold !important;
 }
 
 .streamlit-expanderContent {
@@ -651,7 +630,7 @@ h1, h2, h3, h4 {
     padding: 15px !important;
 }
 
-/* Sidebar azul claro */
+/* Sidebar */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #87CEEB 0%, #4682B4 100%) !important;
     border-right: 3px solid #FFD700 !important;
@@ -678,9 +657,9 @@ input, textarea, .stSelectbox > div > div {
     border-radius: 25px !important;
 }
 
-/* Stats panel */
+/* Panel de estadísticas */
 .stats-panel {
-    background: #0a0a0a !important;
+    background: rgba(0,0,0,0.8) !important;
     padding: 15px !important;
     border-radius: 20px !important;
     border: 2px solid #FFD700 !important;
@@ -700,69 +679,55 @@ input, textarea, .stSelectbox > div > div {
 
 .bronze-footer p {
     color: #ffd700 !important;
-}
-
-/* Tabs */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 8px !important;
-    background-color: #1a1a1a !important;
-    border-radius: 15px !important;
-    padding: 8px !important;
-}
-
-.stTabs [data-baseweb="tab"] {
-    background-color: #2a2a2a !important;
-    border-radius: 12px !important;
-    color: #FFD700 !important;
     font-weight: bold !important;
-    padding: 10px 25px !important;
 }
 
-.stTabs [aria-selected="true"] {
-    background: linear-gradient(135deg, #FFD700, #CF142B) !important;
+/* Mensajes informativos */
+.stInfo, .stSuccess, .stWarning, .stError {
+    background-color: rgba(0,0,0,0.8) !important;
     color: white !important;
 }
 
-/* Reproductor de audio personalizado */
+/* Reproductor de audio */
 audio {
     width: 100%;
     border-radius: 30px;
-    background-color: #1a1a1a;
-}
-
-/* Mensajes de información */
-.stInfo, .stSuccess, .stWarning, .stError {
-    background-color: #1a1a1a !important;
-    color: #ffffff !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================
-# ENCABEZADO
+# ENCABEZADO CON FOTO DE PORTADA
 # ============================================
-st.markdown("""
+portada_url = get_portada_url()
+if not portada_url:
+    portada_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_%28state%29.svg.png"
+
+st.markdown(f"""
 <div style="text-align: center; margin-bottom: 20px;">
-    <div style="background: linear-gradient(135deg, #1a1a2e, #0f0f1a);
+    <div style="background: linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55)), 
+                url('{portada_url}');
+                background-size: cover;
+                background-position: center;
                 border-radius: 20px;
-                padding: 60px 20px;
+                padding: 80px 20px;
                 border: 3px solid #FFD700;
                 box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
-        <h1 style="color: #FFD700; text-shadow: 3px 3px 6px black; font-size: 2.5em; margin: 0;">Santa Teresa al Dia</h1>
-        <p style="color: #FFFFFF; text-shadow: 2px 2px 4px black; font-size: 1.2em; margin-top: 10px;">Informacion, Cultura y Fe de nuestro pueblo</p>
+        <h1 style="color: #FFD700; text-shadow: 3px 3px 8px black; font-size: 2.5em; margin: 0;">Santa Teresa al Dia</h1>
+        <p style="color: #FFFFFF; text-shadow: 2px 2px 5px black; font-size: 1.3em; margin-top: 10px;">Informacion, Cultura y Fe de nuestro pueblo</p>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ============================================
-# OBTENER VALORES ACTUALIZADOS
+# FECHA Y HORA
 # ============================================
 ahora = get_fecha_hora_venezuela()
 dias = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"]
 meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 visitas = get_visitas()
-dolar = get_dolar()  # ← Se obtiene siempre el valor actualizado
+dolar = get_dolar()
 
 # ============================================
 # LOGO
@@ -772,7 +737,7 @@ if logo:
     st.markdown(f'<div style="text-align: center;"><img src="{logo}" style="max-width: 200px;"></div>', unsafe_allow_html=True)
 
 # ============================================
-# BOTONES DE COMPARTIR
+# BOTONES COMPARTIR
 # ============================================
 st.markdown(f"""
 <div style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; margin: 15px 0;">
@@ -792,11 +757,9 @@ function copyToClipboard(text) {{
 st.markdown("---")
 
 # ============================================
-# PANEL SUPERIOR (con dólar en vivo)
+# PANEL SUPERIOR
 # ============================================
-# Actualizar dolar cada vez que se carga la página
 dolar = get_dolar()
-
 st.markdown(f"""
 <div class="stats-panel">
     <span style="color:#FFD700;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</span><br>
@@ -806,7 +769,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ============================================
-# SIDEBAR - PANEL DE ADMINISTRACION
+# SIDEBAR ADMIN
 # ============================================
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_%28state%29.svg.png", width=150)
@@ -825,13 +788,11 @@ with st.sidebar:
     if es_admin:
         st.markdown("---")
         st.markdown("### 📋 Panel de Control")
-        
         admin_opt = st.radio("Seleccionar módulo:", [
             "📰 Noticias", "🏪 Negocios", "💭 Reflexiones", "📜 Crónicas",
             "🎬 Videos", "🎵 Música", "⚠️ Denuncias", "💬 Opiniones", 
-            "👤 Personajes", "⚙️ Configuración"
+            "👥 Personajes", "🎨 Portada", "⚙️ Configuración"
         ])
-        
         st.session_state.admin_opt = admin_opt
         st.session_state.es_admin = True
     else:
@@ -840,14 +801,13 @@ with st.sidebar:
 # ============================================
 # MENU PRINCIPAL (TABS)
 # ============================================
-menu_tabs = st.tabs(["🏠 Portada", "📰 Noticias", "📍 Donde ir - Donde comprar", "💭 Reflexiones", "📜 Crónicas", "🎬 Multimedia", "⚠️ Denuncias", "💬 Opiniones", "👤 Personaje del Día", "📅 Efemérides Médicas"])
+menu_tabs = st.tabs(["🏠 Portada", "📰 Noticias", "📍 Donde ir - Donde comprar", "💭 Reflexiones", "📜 Crónicas", "🎬 Multimedia", "⚠️ Denuncias", "💬 Opiniones", "👥 Personajes que hicieron historia", "📅 Efemérides Médicas"])
 
 # --- TAB 0: PORTADA ---
 with menu_tabs[0]:
     st.title("Santa Teresa al Dia")
     
     col1, col2 = st.columns(2)
-    
     with col1:
         st.markdown("### 📰 Últimas Noticias")
         noticias = get_noticias()
@@ -863,7 +823,7 @@ with menu_tabs[0]:
     with col2:
         st.markdown("### ✝️ Reflexión del Día")
         ref = get_reflexion_activa()
-        if ref is not None:
+        if ref:
             with st.expander(f"{ref['titulo']}", expanded=True):
                 st.write(ref['contenido'])
                 st.caption(f"📖 {ref['versiculo']}")
@@ -885,7 +845,6 @@ with menu_tabs[0]:
 # --- TAB 1: NOTICIAS ---
 with menu_tabs[1]:
     st.title("📰 Noticias")
-    
     tab_nac, tab_inter, tab_dep = st.tabs(["🇻🇪 Nacionales", "🌎 Internacionales", "⚽ Deportes"])
     
     with tab_nac:
@@ -924,7 +883,6 @@ with menu_tabs[1]:
 # --- TAB 2: DONDE IR - DONDE COMPRAR ---
 with menu_tabs[2]:
     st.title("📍 Donde ir - Donde comprar")
-    
     negocios = get_negocios()
     if not negocios.empty:
         for _, n in negocios.iterrows():
@@ -933,7 +891,7 @@ with menu_tabs[2]:
                 if n.get('imagen_url'):
                     st.image(n['imagen_url'], use_container_width=True)
                 else:
-                    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_28state%29.svg.png", use_container_width=True)
+                    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_%28state%29.svg.png", use_container_width=True)
             with col_b:
                 st.markdown(f"### {n['nombre']}")
                 st.caption(n['categoria'])
@@ -951,9 +909,8 @@ with menu_tabs[2]:
 # --- TAB 3: REFLEXIONES ---
 with menu_tabs[3]:
     st.title("💭 Reflexiones")
-    
     ref = get_reflexion_activa()
-    if ref is not None:
+    if ref:
         with st.expander(f"✨ ACTUAL: {ref['titulo']}", expanded=True):
             st.write(ref['contenido'])
             st.caption(f"📖 {ref['versiculo']}")
@@ -977,10 +934,8 @@ with menu_tabs[3]:
 # --- TAB 4: CRONICAS ---
 with menu_tabs[4]:
     st.title("📜 Crónicas")
-    
     estados = ["Todos", "Miranda", "Carabobo", "Distrito Capital", "Zulia", "Lara", "Aragua", "Bolivar", "Anzoategui", "Merida", "Tachira", "Nueva Esparta", "Sucre", "Falcon", "Barinas", "Portuguesa", "Guarico", "Cojedes", "Trujillo", "Yaracuy", "Apure", "Amazonas", "Delta Amacuro", "Vargas"]
     estado_filtro = st.selectbox("Filtrar por estado:", estados)
-    
     cronicas = get_cronicas(estado_filtro if estado_filtro != "Todos" else None)
     if not cronicas.empty:
         for _, c in cronicas.iterrows():
@@ -993,7 +948,6 @@ with menu_tabs[4]:
 # --- TAB 5: MULTIMEDIA ---
 with menu_tabs[5]:
     st.title("🎬 Multimedia")
-    
     tab_vid, tab_mus, tab_rad = st.tabs(["🎥 Videos", "🎵 Música", "📻 Radio"])
     
     with tab_vid:
@@ -1004,7 +958,7 @@ with menu_tabs[5]:
                     mostrar_video_youtube(v['video_url'])
                     st.caption(f"Subido: {v['fecha']}")
         else:
-            st.info("No hay videos disponibles. Agrega URLs de YouTube en el panel de administración.")
+            st.info("No hay videos disponibles")
     
     with tab_mus:
         musicas = get_musicas()
@@ -1013,9 +967,8 @@ with menu_tabs[5]:
                 with st.expander(f"🎵 {m['titulo']}"):
                     mostrar_musica(m['audio_url'])
                     st.caption(f"Agregado: {m['fecha']}")
-                    st.caption("🎵 Música alojada en SirenMix")
         else:
-            st.info("No hay música disponible. Agrega URLs de SirenMix en el panel de administración.")
+            st.info("No hay música disponible")
     
     with tab_rad:
         st.markdown("### 📻 Radio Online")
@@ -1024,7 +977,6 @@ with menu_tabs[5]:
 # --- TAB 6: DENUNCIAS ---
 with menu_tabs[6]:
     st.title("⚠️ Denuncias Ciudadanas")
-    
     tab_den, tab_ver = st.tabs(["📝 Hacer Denuncia", "👁️ Ver Denuncias"])
     
     with tab_den:
@@ -1057,7 +1009,6 @@ with menu_tabs[6]:
 # --- TAB 7: OPINIONES ---
 with menu_tabs[7]:
     st.title("💬 Opiniones")
-    
     tab_op, tab_ver_op = st.tabs(["✍️ Dar Opinión", "👁️ Ver Opiniones"])
     
     with tab_op:
@@ -1085,9 +1036,9 @@ with menu_tabs[7]:
         else:
             st.info("No hay opiniones aprobadas")
 
-# --- TAB 8: PERSONAJE DEL DIA ---
+# --- TAB 8: PERSONAJES QUE HICIERON HISTORIA ---
 with menu_tabs[8]:
-    st.title("👤 Personaje del Día")
+    st.title("👥 Personajes que hicieron historia")
     
     fecha_actual = ahora.strftime("%d/%m/%Y")
     personaje = get_personaje_dia(fecha_actual)
@@ -1103,12 +1054,8 @@ with menu_tabs[8]:
             st.markdown(f"## {personaje['nombre']}")
             st.markdown("### 📖 Biografía")
             st.write(personaje['descripcion'])
-            if personaje.get('logros'):
-                st.markdown("### 🏆 Logros")
-                st.write(personaje['logros'])
     else:
         st.info(f"No hay personaje destacado para hoy ({fecha_actual})")
-        
         st.markdown("---")
         st.markdown("### 📜 Personajes Históricos Registrados")
         personajes_historicos = get_personajes_historicos()
@@ -1118,49 +1065,39 @@ with menu_tabs[8]:
                     if p.get('imagen_url'):
                         st.image(p['imagen_url'], width=150)
                     st.write(p['descripcion'])
-                    if p.get('logros'):
-                        st.caption(f"🏆 {p['logros']}")
         else:
-            st.info("No hay personajes registrados. Ve al panel de administración para agregar.")
+            st.info("No hay personajes registrados")
 
 # --- TAB 9: EFEMÉRIDES MÉDICAS ---
 with menu_tabs[9]:
     st.title("📅 Efemérides Médicas")
-    
     fecha_actual_str = f"{ahora.day} de {meses[ahora.month-1]}"
     st.markdown(f"### 📌 {dias[ahora.weekday()]}, {fecha_actual_str} de {ahora.year}")
     
     col_ven, col_mundo = st.columns(2)
-    
     with col_ven:
         st.markdown("#### 🇻🇪 Venezuela")
-        
         efemerides_venezuela = {
-            "24 de Junio": "Día del Médico Venezolano. Se conmemora el nacimiento del Dr. José María Vargas",
+            "24 de Junio": "Día del Médico Venezolano",
             "3 de Diciembre": "Día del Odontólogo Venezolano",
             "13 de Octubre": "Día del Trabajador de la Salud",
             "10 de Diciembre": "Día de la Enfermera Venezolana"
         }
-        
         hoy_ven = None
         for fecha, texto in efemerides_venezuela.items():
             if fecha == fecha_actual_str:
                 hoy_ven = texto
                 break
-        
         if hoy_ven:
             st.success(f"🎉 **¡HOY!** {fecha_actual_str}: {hoy_ven}")
         else:
             st.info(f"📌 Para hoy ({fecha_actual_str}) no hay efeméride médica registrada")
-        
-        st.markdown("---")
         st.markdown("**📅 Otras efemérides:**")
         for fecha, texto in efemerides_venezuela.items():
             st.markdown(f"- **{fecha}:** {texto}")
     
     with col_mundo:
         st.markdown("#### 🌎 Mundo")
-        
         efemerides_mundo = {
             "12 de Mayo": "Día Internacional de la Enfermería",
             "7 de Abril": "Día Mundial de la Salud",
@@ -1169,19 +1106,15 @@ with menu_tabs[9]:
             "10 de Octubre": "Día Mundial de la Salud Mental",
             "14 de Noviembre": "Día Mundial de la Diabetes"
         }
-        
         hoy_mundo = None
         for fecha, texto in efemerides_mundo.items():
             if fecha == fecha_actual_str:
                 hoy_mundo = texto
                 break
-        
         if hoy_mundo:
             st.success(f"🎉 **¡HOY!** {fecha_actual_str}: {hoy_mundo}")
         else:
             st.info(f"📌 Para hoy ({fecha_actual_str}) no hay efeméride médica mundial")
-        
-        st.markdown("---")
         st.markdown("**📅 Otras efemérides:**")
         for fecha, texto in efemerides_mundo.items():
             st.markdown(f"- **{fecha}:** {texto}")
@@ -1191,7 +1124,6 @@ with menu_tabs[9]:
 # ============================================
 if st.session_state.get('es_admin', False):
     admin_opt = st.session_state.get('admin_opt', "📰 Noticias")
-    
     st.title("🔧 Panel de Administración")
     
     if "📰 Noticias" in admin_opt:
@@ -1209,8 +1141,6 @@ if st.session_state.get('es_admin', False):
                 else:
                     st.error("❌ Título y contenido obligatorios")
         
-        st.markdown("---")
-        st.markdown("### 📋 Noticias existentes")
         for _, n in get_noticias().iterrows():
             with st.expander(f"{n['titulo']} - {n['categoria']}"):
                 if n.get('imagen_url'):
@@ -1236,8 +1166,6 @@ if st.session_state.get('es_admin', False):
                     st.success("✅ Negocio agregado")
                     st.rerun()
         
-        st.markdown("---")
-        st.markdown("### 📋 Negocios existentes")
         for _, n in get_negocios().iterrows():
             with st.expander(f"{n['nombre']}"):
                 if n.get('imagen_url'):
@@ -1259,8 +1187,6 @@ if st.session_state.get('es_admin', False):
                     st.success("✅ Reflexión guardada")
                     st.rerun()
         
-        st.markdown("---")
-        st.markdown("### 📋 Reflexiones anteriores")
         for _, r in get_reflexiones().iterrows():
             with st.expander(f"{r['titulo']}"):
                 st.write(r['contenido'])
@@ -1281,8 +1207,6 @@ if st.session_state.get('es_admin', False):
                     st.success("✅ Crónica guardada")
                     st.rerun()
         
-        st.markdown("---")
-        st.markdown("### 📋 Crónicas existentes")
         for _, c in get_cronicas().iterrows():
             with st.expander(c['titulo']):
                 st.write(c['contenido'])
@@ -1292,21 +1216,17 @@ if st.session_state.get('es_admin', False):
     
     elif "🎬 Videos" in admin_opt:
         st.subheader("🎬 Videos (YouTube)")
-        st.info("📌 **Instrucciones:** Sube tu video a YouTube, copia la URL y pégala aquí.")
-        
         with st.form("fvid"):
             titulo = st.text_input("Título del video")
-            url_youtube = st.text_input("URL de YouTube", placeholder="https://youtu.be/XXXXX o https://www.youtube.com/watch?v=XXXXX")
+            url_youtube = st.text_input("URL de YouTube", placeholder="https://youtu.be/XXXXX")
             if st.form_submit_button("📤 Agregar Video"):
                 if titulo and url_youtube:
                     add_video(titulo, url_youtube)
-                    st.success("✅ Video agregado correctamente")
+                    st.success("✅ Video agregado")
                     st.rerun()
                 else:
-                    st.error("❌ Título y URL son obligatorios")
+                    st.error("❌ Título y URL obligatorios")
         
-        st.markdown("---")
-        st.markdown("### 📋 Videos existentes")
         for _, v in get_videos().iterrows():
             with st.expander(v['titulo']):
                 mostrar_video_youtube(v['video_url'])
@@ -1316,32 +1236,20 @@ if st.session_state.get('es_admin', False):
     
     elif "🎵 Música" in admin_opt:
         st.subheader("🎵 Música (SirenMix)")
-        st.info("📌 **Instrucciones:** Sube tu canción a SirenMix, copia la URL del archivo de audio y pégala aquí.")
-        st.markdown("""
-        **Cómo obtener la URL en SirenMix:**
-        1. Ve a [SirenMix.com](https://sirenmix.com) y regístrate (gratis)
-        2. Sube tu canción desde tu laptop
-        3. Haz clic en "Share" o "Copiar enlace directo"
-        4. Pega la URL aquí (debe terminar en .mp3, .wav, etc.)
-        """)
-        
         with st.form("fmus"):
             titulo = st.text_input("Título de la canción")
-            url_audio = st.text_input("URL del audio (SirenMix)", placeholder="https://sirenmix.com/tu-cancion.mp3")
+            url_audio = st.text_input("URL del audio", placeholder="https://sirenmix.com/cancion.mp3")
             if st.form_submit_button("📤 Agregar Música"):
                 if titulo and url_audio:
                     add_musica(titulo, url_audio)
-                    st.success("✅ Música agregada correctamente")
+                    st.success("✅ Música agregada")
                     st.rerun()
                 else:
-                    st.error("❌ Título y URL son obligatorios")
+                    st.error("❌ Título y URL obligatorios")
         
-        st.markdown("---")
-        st.markdown("### 📋 Archivos de música")
         for _, m in get_musicas().iterrows():
             with st.expander(m['titulo']):
                 mostrar_musica(m['audio_url'])
-                st.caption(f"Agregado: {m['fecha']}")
                 if st.button("🗑️ Eliminar", key=f"del_mus_{m['id']}"):
                     delete_musica(m['id'])
                     st.rerun()
@@ -1350,77 +1258,52 @@ if st.session_state.get('es_admin', False):
         st.subheader("⚠️ Gestionar Denuncias")
         for _, d in get_denuncias().iterrows():
             with st.expander(f"{d['titulo']} - {d['estatus']}"):
-                st.write(f"**Denunciante:** {d['denunciante']}")
-                st.write(f"**Descripción:** {d['descripcion']}")
-                st.write(f"**Ubicación:** {d['ubicacion'] if d['ubicacion'] else 'No especificada'}")
-                nuevo = st.selectbox("Cambiar estado:", ["Pendiente", "En revisión", "Resuelta", "Descartada"], 
-                                   index=["Pendiente", "En revisión", "Resuelta", "Descartada"].index(d['estatus']), 
-                                   key=f"est_{d['id']}")
-                if st.button("✅ Actualizar", key=f"upd_{d['id']}"):
+                st.write(d['descripcion'])
+                nuevo = st.selectbox("Estado", ["Pendiente", "En revisión", "Resuelta", "Descartada"], 
+                                   index=["Pendiente", "En revisión", "Resuelta", "Descartada"].index(d['estatus']))
+                if st.button("Actualizar", key=f"upd_{d['id']}"):
                     update_denuncia_status(d['id'], nuevo)
-                    st.success("✅ Estado actualizado")
                     st.rerun()
-                if st.button("🗑️ Eliminar", key=f"del_den_{d['id']}"):
+                if st.button("Eliminar", key=f"del_den_{d['id']}"):
                     delete_denuncia(d['id'])
-                    st.success("✅ Denuncia eliminada")
                     st.rerun()
     
     elif "💬 Opiniones" in admin_opt:
-        st.subheader("💬 Gestionar Opiniones")
-        st.markdown("### ⏳ Opiniones pendientes de aprobar")
-        
-        opiniones_pendientes = get_opiniones(aprobadas=False)
-        if not opiniones_pendientes.empty:
-            for _, op in opiniones_pendientes.iterrows():
-                if not op['aprobada']:
-                    with st.expander(f"👤 {op['usuario']} - {op['calificacion']}⭐"):
-                        st.write(f"**Comentario:** {op['comentario']}")
-                        st.caption(f"📅 {op['fecha']}")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("✅ Aprobar", key=f"aprob_{op['id']}"):
-                                approve_opinion(op['id'])
-                                st.rerun()
-                        with col2:
-                            if st.button("🗑️ Eliminar", key=f"del_op_{op['id']}"):
-                                delete_opinion(op['id'])
-                                st.rerun()
-        else:
-            st.info("No hay opiniones pendientes")
-        
-        st.markdown("---")
-        st.markdown("### ✅ Opiniones aprobadas")
-        opiniones_aprobadas = get_opiniones(aprobadas=True)
-        if not opiniones_aprobadas.empty:
-            for _, op in opiniones_aprobadas.iterrows():
-                with st.expander(f"👤 {op['usuario']} - {op['calificacion']}⭐"):
-                    st.write(f"**Comentario:** {op['comentario']}")
-                    st.caption(f"📅 {op['fecha']}")
-                    if st.button("🗑️ Eliminar", key=f"del_op_aprob_{op['id']}"):
+        st.subheader("💬 Opiniones Pendientes")
+        for _, op in get_opiniones(aprobadas=False).iterrows():
+            if not op['aprobada']:
+                with st.expander(f"{op['usuario']} - {op['calificacion']}⭐"):
+                    st.write(op['comentario'])
+                    if st.button("✅ Aprobar", key=f"aprob_{op['id']}"):
+                        approve_opinion(op['id'])
+                        st.rerun()
+                    if st.button("🗑️ Eliminar", key=f"del_op_{op['id']}"):
                         delete_opinion(op['id'])
                         st.rerun()
-        else:
-            st.info("No hay opiniones aprobadas")
-    
-    elif "👤 Personajes" in admin_opt:
-        st.subheader("👤 Gestionar Personajes")
         
+        st.markdown("### ✅ Opiniones aprobadas")
+        for _, op in get_opiniones(aprobadas=True).iterrows():
+            with st.expander(f"{op['usuario']} - {op['calificacion']}⭐"):
+                st.write(op['comentario'])
+                if st.button("🗑️ Eliminar", key=f"del_op_aprob_{op['id']}"):
+                    delete_opinion(op['id'])
+                    st.rerun()
+    
+    elif "👥 Personajes" in admin_opt:
+        st.subheader("👥 Gestionar Personajes")
         with st.form("fpersonaje"):
             nombre = st.text_input("Nombre del personaje")
             fecha_personaje = st.date_input("Fecha a mostrar", value=datetime.now().date())
             descripcion = st.text_area("Biografía")
-            logros = st.text_area("Logros y contribuciones")
             imagen = st.file_uploader("Imagen (desde tu laptop)", type=["jpg", "png", "jpeg"])
-            
             if st.form_submit_button("💾 Guardar Personaje"):
                 if nombre and descripcion:
-                    add_personaje(nombre, descripcion, logros, imagen, fecha_personaje.strftime("%d/%m/%Y"))
+                    add_personaje(nombre, descripcion, imagen, fecha_personaje.strftime("%d/%m/%Y"))
                     st.success("✅ Personaje guardado")
                     st.rerun()
                 else:
                     st.error("❌ Nombre y biografía obligatorios")
         
-        st.markdown("---")
         st.markdown("### 📋 Personajes Registrados")
         personajes = get_personajes_historicos()
         if not personajes.empty:
@@ -1429,26 +1312,39 @@ if st.session_state.get('es_admin', False):
                     if p.get('imagen_url'):
                         st.image(p['imagen_url'], width=150)
                     st.write(p['descripcion'])
-                    if p.get('logros'):
-                        st.caption(f"🏆 {p['logros']}")
                     if st.button("🗑️ Eliminar", key=f"del_pers_{p['id']}"):
                         delete_personaje(p['id'])
                         st.rerun()
         else:
             st.info("No hay personajes registrados")
     
+    elif "🎨 Portada" in admin_opt:
+        st.subheader("🎨 Personalizar Portada")
+        st.info("Sube una imagen que aparecerá como fondo en el encabezado principal de la página.")
+        
+        portada_actual = get_portada_url()
+        if portada_actual:
+            st.image(portada_actual, width=400, caption="Portada actual")
+        
+        nueva_portada = st.file_uploader("Subir nueva imagen de portada", type=["jpg", "png", "jpeg"])
+        if nueva_portada and st.button("💾 Guardar Portada"):
+            url_portada = subir_imagen_storage(nueva_portada, "portada")
+            if url_portada:
+                save_portada_url(url_portada)
+                st.success("✅ Portada actualizada correctamente")
+                st.rerun()
+    
     elif "⚙️ Configuración" in admin_opt:
         st.subheader("⚙️ Configuración del Sistema")
         
         st.markdown("### 💵 Tipo de Cambio Dólar BCV")
         dolar_actual = get_dolar()
-        st.metric("Valor actual", f"{dolar_actual:.2f} Bs")
-        
-        nuevo_dolar = st.number_input("Nuevo valor:", value=float(dolar_actual), step=0.01, format="%.2f")
-        if st.button("💾 Actualizar Dólar"):
+        st.write(f"Valor actual: **{dolar_actual:.2f} Bs**")
+        nuevo_dolar = st.number_input("Nuevo valor:", value=float(dolar_actual), step=0.01, format="%.2f", key="dolar_input")
+        if st.button("💾 Actualizar Dólar", key="btn_dolar"):
             if actualizar_dolar_manual(nuevo_dolar):
                 st.success("✅ Valor del dólar actualizado correctamente")
-                st.balloons()
+                st.cache_data.clear()
                 st.rerun()
             else:
                 st.error("❌ Error al actualizar el dólar")
@@ -1457,8 +1353,8 @@ if st.session_state.get('es_admin', False):
         st.markdown("### 🖼️ Logo de la aplicación")
         if logo:
             st.image(logo, width=150)
-        nuevo_logo = st.file_uploader("Subir nuevo logo (desde tu laptop)", type=["png", "jpg", "jpeg"])
-        if nuevo_logo and st.button("💾 Guardar Logo"):
+        nuevo_logo = st.file_uploader("Subir nuevo logo", type=["png", "jpg", "jpeg"])
+        if nuevo_logo and st.button("💾 Guardar Logo", key="btn_logo"):
             url_logo = subir_imagen_storage(nuevo_logo, "logo")
             if url_logo:
                 save_logo(url_logo)
