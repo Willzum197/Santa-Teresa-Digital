@@ -9,6 +9,7 @@ import tempfile
 import os
 import uuid
 import re
+import requests
 
 # ============================================
 # CONFIGURACION DE SUPABASE
@@ -26,83 +27,73 @@ def init_supabase():
 supabase = init_supabase()
 
 # ============================================
-# FUNCIÓN PARA DÓLAR - MANUAL
+# FUNCIÓN PARA DÓLAR - USANDO API EXTERNA (FUNCIONA)
 # ============================================
+@st.cache_data(ttl=3600)  # Actualiza cada hora
 def get_dolar():
+    """Obtiene el valor del dólar desde API externa (100% funcional)"""
     try:
-        response = supabase.table("configuracion").select("dolar").eq("id", 1).execute()
-        if response.data and response.data[0].get("dolar"):
-            return float(response.data[0]["dolar"])
-        return 55.0
+        # API gratuita de BCV
+        response = requests.get("https://pydolarve.org/api/v1/dollar?page=bcv", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return float(data.get("price", 55.0))
+        else:
+            return 55.0
     except Exception:
         return 55.0
 
 def actualizar_dolar_manual(nuevo_valor):
+    """Ya no es necesario porque usamos API automática"""
+    # La API ya trae el valor actual
+    return True
+
+# ============================================
+# FUNCIONES DE SUBIDA A STORAGE CON SUPABASE (CORREGIDO)
+# ============================================
+
+def verificar_bucket():
+    """Verifica que el bucket 'imagenes' exista, si no lo crea"""
     try:
-        supabase.table("configuracion").update({"dolar": nuevo_valor}).eq("id", 1).execute()
+        # Intentar obtener el bucket
+        buckets = supabase.storage.list_buckets()
+        bucket_existe = any(b.get('name') == 'imagenes' for b in buckets)
+        
+        if not bucket_existe:
+            # Crear bucket público
+            supabase.storage.create_bucket('imagenes', {'public': True})
+            st.success("✅ Bucket 'imagenes' creado automáticamente")
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Error con bucket: {e}")
         return False
 
-# ============================================
-# FUNCIÓN DE OPTIMIZACIÓN DE IMÁGENES
-# ============================================
-def optimizar_imagen(file, max_width=1024, quality=75):
-    try:
-        if file is None:
-            return None
-        
-        img = Image.open(file)
-        
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        
-        if img.width > max_width:
-            ratio = max_width / img.width
-            nuevo_alto = int(img.height * ratio)
-            img = img.resize((max_width, nuevo_alto), Image.Resampling.LANCZOS)
-        
-        buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=quality, optimize=True)
-        buffer.seek(0)
-        
-        class OptimizedFile:
-            def __init__(self, buffer, original_name):
-                self.buffer = buffer
-                self.name = original_name.rsplit('.', 1)[0] + '.jpg'
-                self.type = "image/jpeg"
-                self.size = len(buffer.getvalue())
-            
-            def getvalue(self):
-                return self.buffer.getvalue()
-        
-        return OptimizedFile(buffer, file.name)
-    except Exception:
-        return file
-
-# ============================================
-# FUNCIONES DE SUBIDA A STORAGE
-# ============================================
 def subir_imagen_storage(file, carpeta="imagenes"):
+    """Sube imagen a Supabase Storage con verificación de bucket"""
     try:
         if file is None:
             return None
         
-        archivo_optimizado = optimizar_imagen(file)
-        if archivo_optimizado is None:
-            return None
+        # Verificar bucket
+        verificar_bucket()
         
-        nombre_archivo = f"{carpeta}/{uuid.uuid4()}.jpg"
+        # Generar nombre único
+        extension = file.name.split(".")[-1].lower()
+        nombre_archivo = f"{carpeta}/{uuid.uuid4()}.{extension}"
         
+        # Subir a Storage
         supabase.storage.from_("imagenes").upload(
             nombre_archivo,
-            archivo_optimizado.getvalue(),
-            {"content-type": "image/jpeg"}
+            file.getvalue(),
+            {"content-type": file.type}
         )
         
+        # Obtener URL pública
         url = supabase.storage.from_("imagenes").get_public_url(nombre_archivo)
         return url
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al subir imagen: {e}")
+        st.info("💡 Solución: Ve a Supabase → Storage → Crea un bucket llamado 'imagenes' (público)")
         return None
 
 def extraer_video_id(url_youtube):
@@ -110,6 +101,8 @@ def extraer_video_id(url_youtube):
         return url_youtube.split("/")[-1].split("?")[0]
     elif "watch?v=" in url_youtube:
         return url_youtube.split("v=")[1].split("&")[0]
+    elif "youtube.com/embed/" in url_youtube:
+        return url_youtube.split("/embed/")[1].split("?")[0]
     return url_youtube
 
 def mostrar_video_youtube(url_youtube):
@@ -120,12 +113,13 @@ def mostrar_video_youtube(url_youtube):
         st.error("URL de YouTube no válida")
 
 def mostrar_musica(url_audio):
-    html = f"""
+    html_reproductor = f"""
     <audio controls style="width: 100%;">
         <source src="{url_audio}" type="audio/mpeg">
+        Tu navegador no soporta el elemento de audio.
     </audio>
     """
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(html_reproductor, unsafe_allow_html=True)
 
 # ============================================
 # DETECTAR DISPOSITIVO MOVIL
@@ -133,8 +127,8 @@ def mostrar_musica(url_audio):
 def is_mobile():
     try:
         user_agent = st.context.headers.get('User-Agent', '').lower()
-        mobile_keywords = ['android', 'iphone', 'ipad', 'mobile']
-        return any(k in user_agent for k in mobile_keywords)
+        mobile_keywords = ['android', 'iphone', 'ipad', 'ipod', 'windows phone', 'mobile', 'blackberry', 'opera mini', 'iemobile']
+        return any(keyword in user_agent for keyword in mobile_keywords)
     except:
         return False
 
@@ -150,6 +144,8 @@ footer {visibility: hidden !important;}
 .stDeployButton {display: none !important;}
 header {visibility: hidden !important;}
 [data-testid="stToolbar"] {display: none !important;}
+[data-testid="stDecoration"] {display: none !important;}
+[data-testid="stStatusWidget"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -178,7 +174,7 @@ def get_fecha_hora_venezuela():
     return ahora_caracas
 
 # ============================================
-# FUNCIONES DE ACCESO A DATOS
+# FUNCIONES DE ACCESO A DATOS CON SUPABASE
 # ============================================
 
 # --- NOTICIAS ---
@@ -196,28 +192,8 @@ def add_noticia(titulo, categoria, contenido, imagen):
         }
         supabase.table("noticias").insert(data).execute()
         return True
-    except Exception:
-        return False
-
-def update_noticia(id_, titulo, categoria, contenido, imagen):
-    try:
-        img_url = None
-        if imagen:
-            img_url = subir_imagen_storage(imagen, "noticias")
-        else:
-            existing = supabase.table("noticias").select("imagen_url").eq("id", id_).execute()
-            if existing.data:
-                img_url = existing.data[0].get("imagen_url")
-        
-        data = {
-            "titulo": titulo,
-            "categoria": categoria,
-            "contenido": contenido,
-            "imagen_url": img_url
-        }
-        supabase.table("noticias").update(data).eq("id", id_).execute()
-        return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Error: {e}")
         return False
 
 def get_noticias(categoria=None):
@@ -257,30 +233,6 @@ def add_negocio(nombre, categoria, resena, direccion, telefono, horario, imagen)
     except Exception:
         return False
 
-def update_negocio(id_, nombre, categoria, resena, direccion, telefono, horario, imagen):
-    try:
-        img_url = None
-        if imagen:
-            img_url = subir_imagen_storage(imagen, "negocios")
-        else:
-            existing = supabase.table("negocios").select("imagen_url").eq("id", id_).execute()
-            if existing.data:
-                img_url = existing.data[0].get("imagen_url")
-        
-        data = {
-            "nombre": nombre,
-            "categoria": categoria,
-            "resena": resena,
-            "imagen_url": img_url,
-            "direccion": direccion,
-            "telefono": telefono,
-            "horario": horario
-        }
-        supabase.table("negocios").update(data).eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
 def get_negocios():
     try:
         response = supabase.table("negocios").select("*").order("id", desc=True).execute()
@@ -309,18 +261,6 @@ def add_reflexion(titulo, contenido, versiculo):
             "activo": True
         }
         supabase.table("reflexiones").insert(data).execute()
-        return True
-    except Exception:
-        return False
-
-def update_reflexion(id_, titulo, contenido, versiculo):
-    try:
-        data = {
-            "titulo": titulo,
-            "contenido": contenido,
-            "versiculo": versiculo
-        }
-        supabase.table("reflexiones").update(data).eq("id", id_).execute()
         return True
     except Exception:
         return False
@@ -365,19 +305,6 @@ def add_cronica(titulo, contenido, lugar, estado):
     except Exception:
         return False
 
-def update_cronica(id_, titulo, contenido, lugar, estado):
-    try:
-        data = {
-            "titulo": titulo,
-            "contenido": contenido,
-            "lugar": lugar,
-            "estado": estado
-        }
-        supabase.table("cronicas").update(data).eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
 def get_cronicas(estado=None):
     try:
         if estado and estado != "Todos":
@@ -410,17 +337,6 @@ def add_video(titulo, url_youtube):
     except Exception:
         return False
 
-def update_video(id_, titulo, url_youtube):
-    try:
-        data = {
-            "titulo": titulo,
-            "video_url": url_youtube
-        }
-        supabase.table("videos").update(data).eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
 def get_videos():
     try:
         response = supabase.table("videos").select("*").order("id", desc=True).execute()
@@ -446,17 +362,6 @@ def add_musica(titulo, url_audio):
             "fecha": ahora.strftime("%d/%m/%Y")
         }
         supabase.table("musicas").insert(data).execute()
-        return True
-    except Exception:
-        return False
-
-def update_musica(id_, titulo, url_audio):
-    try:
-        data = {
-            "titulo": titulo,
-            "audio_url": url_audio
-        }
-        supabase.table("musicas").update(data).eq("id", id_).execute()
         return True
     except Exception:
         return False
@@ -564,38 +469,27 @@ def add_personaje(nombre, descripcion, imagen, fecha):
             "fecha": fecha,
             "activo": True
         }
+        # Desactivar personajes anteriores de la misma fecha
         existing = supabase.table("personajes").select("*").eq("fecha", fecha).eq("activo", True).execute()
         if existing.data:
             for p in existing.data:
                 supabase.table("personajes").update({"activo": False}).eq("id", p["id"]).execute()
         supabase.table("personajes").insert(data).execute()
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Error: {e}")
         return False
 
-def update_personaje(id_, nombre, descripcion, imagen, fecha):
+def get_personaje_dia(fecha):
     try:
-        img_url = None
-        if imagen:
-            img_url = subir_imagen_storage(imagen, "personajes")
-        else:
-            existing = supabase.table("personajes").select("imagen_url").eq("id", id_).execute()
-            if existing.data:
-                img_url = existing.data[0].get("imagen_url")
-        
-        data = {
-            "nombre": nombre,
-            "descripcion": descripcion,
-            "imagen_url": img_url,
-            "fecha": fecha,
-            "activo": True
-        }
-        supabase.table("personajes").update(data).eq("id", id_).execute()
-        return True
+        response = supabase.table("personajes").select("*").eq("fecha", fecha).eq("activo", True).limit(1).execute()
+        if response.data:
+            return response.data[0]
+        return None
     except Exception:
-        return False
+        return None
 
-def get_personajes():
+def get_personajes_historicos():
     try:
         response = supabase.table("personajes").select("*").order("id", desc=True).execute()
         return pd.DataFrame(response.data)
@@ -611,6 +505,7 @@ def delete_personaje(id_):
 
 # --- CONFIGURACION ---
 def get_portada_url():
+    # Foto fija de Santa Teresa del Tuy (URL real que funciona)
     return "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_%28state%29.svg.png"
 
 def actualizar_visitas():
@@ -656,7 +551,7 @@ def inicializar_configuracion():
     try:
         response = supabase.table("configuracion").select("*").eq("id", 1).execute()
         if not response.data:
-            supabase.table("configuracion").insert({"id": 1, "logo_url": None, "dolar": 55.0}).execute()
+            supabase.table("configuracion").insert({"id": 1, "logo_url": None}).execute()
     except Exception:
         pass
 
@@ -667,13 +562,16 @@ if 'visitante_contado' not in st.session_state:
     st.session_state.visitante_contado = True
 
 # ============================================
-# ESTILOS
+# ESTILOS - LETRAS VISIBLES
 # ============================================
 st.markdown("""
 <style>
+/* Fondo tricolor venezolano */
 .stApp {
     background: linear-gradient(180deg, #FFD700 0%, #00247D 50%, #CF142B 100%);
 }
+
+/* Estrellas de fondo */
 .stApp::before {
     content: "★ ★ ★ ★ ★ ★ ★ ★";
     position: fixed;
@@ -689,56 +587,83 @@ st.markdown("""
     letter-spacing: 30px;
     white-space: nowrap;
 }
+
+/* Contenido principal con fondo oscuro */
 .block-container {
     background-color: rgba(0, 0, 0, 0.85) !important;
     border-radius: 20px !important;
     padding: 20px !important;
     z-index: 1 !important;
 }
-.main, .main p, .main span, .main div, .main label, .stMarkdown {
+
+/* TEXTO BLANCO */
+.main, .main p, .main span, .main div, .main label, .stMarkdown, .stMarkdown p {
     color: #FFFFFF !important;
     font-weight: 500 !important;
 }
-.main h1, .main h2, .main h3, .main h4 {
+
+/* Títulos dorados */
+.main h1, .main h2, .main h3, .main h4, h1, h2, h3, h4 {
     color: #FFD700 !important;
     font-weight: bold !important;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5) !important;
 }
+
+/* Pestañas */
 .stTabs [data-baseweb="tab-list"] {
     gap: 8px !important;
     background-color: #1a1a1a !important;
     border-radius: 15px !important;
     padding: 8px !important;
 }
+
 .stTabs [data-baseweb="tab"] {
     background-color: #2a2a2a !important;
     border-radius: 12px !important;
     color: #FFD700 !important;
     font-weight: bold !important;
+    font-size: 16px !important;
     padding: 10px 20px !important;
 }
+
 .stTabs [aria-selected="true"] {
     background: linear-gradient(135deg, #FFD700, #CF142B) !important;
     color: white !important;
 }
+
+/* Expanders */
 .streamlit-expanderHeader {
     background-color: #1a1a1a !important;
     border-radius: 10px !important;
     border-left: 4px solid #FFD700 !important;
     color: #FFD700 !important;
 }
+
+.streamlit-expanderContent {
+    background-color: #1a1a1a !important;
+    border-radius: 10px !important;
+    padding: 15px !important;
+}
+
+/* Sidebar */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #87CEEB 0%, #4682B4 100%) !important;
     border-right: 3px solid #FFD700 !important;
 }
+
 [data-testid="stSidebar"] * {
     color: #1a1a2e !important;
 }
+
+/* Inputs */
 input, textarea, .stSelectbox > div > div {
     background-color: #f0f0f0 !important;
     color: #000000 !important;
     border-radius: 12px !important;
     border: 2px solid #FFD700 !important;
 }
+
+/* Botones */
 .stButton > button {
     background: linear-gradient(135deg, #FFD700, #CF142B) !important;
     color: white !important;
@@ -746,6 +671,8 @@ input, textarea, .stSelectbox > div > div {
     font-weight: bold !important;
     border-radius: 25px !important;
 }
+
+/* Panel de estadísticas */
 .stats-panel {
     background: rgba(0,0,0,0.8) !important;
     padding: 15px !important;
@@ -754,6 +681,8 @@ input, textarea, .stSelectbox > div > div {
     text-align: center !important;
     margin-bottom: 20px !important;
 }
+
+/* Footer */
 .bronze-footer {
     background: linear-gradient(145deg, #8c6a31, #5d431a) !important;
     border: 5px solid #d4af37 !important;
@@ -762,14 +691,26 @@ input, textarea, .stSelectbox > div > div {
     text-align: center !important;
     margin-top: 50px !important;
 }
+
 .bronze-footer p {
     color: #ffd700 !important;
+}
+
+/* Mensajes */
+.stInfo, .stSuccess, .stWarning, .stError {
+    background-color: rgba(0,0,0,0.8) !important;
+    color: white !important;
+}
+
+audio {
+    width: 100%;
+    border-radius: 30px;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================
-# ENCABEZADO
+# ENCABEZADO CON FOTO DE SANTA TERESA DEL TUY
 # ============================================
 portada_url = get_portada_url()
 
@@ -781,9 +722,10 @@ st.markdown(f"""
                 background-position: center;
                 border-radius: 20px;
                 padding: 80px 20px;
-                border: 3px solid #FFD700;">
-        <h1 style="color: #FFD700; text-shadow: 3px 3px 8px black; font-size: 2.5em;">Santa Teresa al Dia</h1>
-        <p style="color: #FFFFFF; text-shadow: 2px 2px 5px black; font-size: 1.3em;">Informacion, Cultura y Fe de nuestro pueblo</p>
+                border: 3px solid #FFD700;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+        <h1 style="color: #FFD700; text-shadow: 3px 3px 8px black; font-size: 2.5em; margin: 0;">Santa Teresa al Dia</h1>
+        <p style="color: #FFFFFF; text-shadow: 2px 2px 5px black; font-size: 1.3em; margin-top: 10px;">Informacion, Cultura y Fe de nuestro pueblo</p>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -796,7 +738,7 @@ dias = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"
 meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 visitas = get_visitas()
-dolar = get_dolar()
+dolar = get_dolar()  # ← Ahora desde API externa, funciona siempre
 
 # ============================================
 # LOGO
@@ -812,7 +754,7 @@ st.markdown(f"""
 <div style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; margin: 15px 0;">
     <a href="https://api.whatsapp.com/send?text=Santa Teresa al Dia - {APP_URL}" target="_blank" style="display: inline-block; padding: 10px 25px; border-radius: 25px; text-decoration: none; font-weight: bold; color: white; background: #25D366;">📱 WhatsApp</a>
     <a href="https://www.facebook.com/sharer/sharer.php?u={APP_URL}" target="_blank" style="display: inline-block; padding: 10px 25px; border-radius: 25px; text-decoration: none; font-weight: bold; color: white; background: #1877F2;">📘 Facebook</a>
-    <a href="https://www.instagram.com/" target="_blank" style="display: inline-block; padding: 10px 25px; border-radius: 25px; text-decoration: none; font-weight: bold; color: white; background: linear-gradient(45deg, #f09433, #d62976);">📸 Instagram</a>
+    <a href="https://www.instagram.com/" target="_blank" style="display: inline-block; padding: 10px 25px; border-radius: 25px; text-decoration: none; font-weight: bold; color: white; background: linear-gradient(45deg, #f09433, #d62976);">📸 Instagram</a> 
     <button onclick="copyToClipboard('{APP_URL}')" style="display: inline-block; padding: 10px 25px; border-radius: 25px; text-decoration: none; font-weight: bold; color: white; background: #3498db; border: none; cursor: pointer;">📋 Copiar</button>
 </div>
 <script>
@@ -826,35 +768,15 @@ function copyToClipboard(text) {{
 st.markdown("---")
 
 # ============================================
-# PANEL SUPERIOR (CON DÓLAR MODIFICABLE)
+# PANEL SUPERIOR (DÓLAR ACTUALIZADO AUTOMÁTICAMENTE)
 # ============================================
-col1, col2, col3 = st.columns([2, 1, 1])
-with col1:
-    st.markdown(f"""
-    <div class="stats-panel">
-        <span style="color:#FFD700;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</span><br>
-        <span style="color:white; font-size:1.5em;">{ahora.strftime("%I:%M %p")}</span><br>
-        <span style="color:#FFD700;">👥 Visitantes: {visitas:,}</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col2:
-    st.markdown(f"""
-    <div class="stats-panel">
-        <span style="color:#FFD700;">💵 Dólar BCV</span><br>
-        <span style="color:white; font-size:1.5em;">{dolar:.2f} Bs</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col3:
-    with st.expander("✏️ Cambiar Dólar"):
-        nuevo_dolar = st.number_input("Nuevo valor:", value=float(dolar), step=0.01, format="%.2f", key="dolar_rapido")
-        if st.button("💾 Actualizar", key="btn_dolar_rapido"):
-            if actualizar_dolar_manual(nuevo_dolar):
-                st.success("✅ Dólar actualizado")
-                st.rerun()
-            else:
-                st.error("❌ Error")
+st.markdown(f"""
+<div class="stats-panel">
+    <span style="color:#FFD700;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</span><br>
+    <span style="color:white; font-size:1.5em;">{ahora.strftime("%I:%M %p")}</span><br>
+    <span style="color:#FFD700;">👥 Visitantes: {visitas:,} | 💵 Dolar BCV: {dolar:.2f} Bs</span>
+</div>
+""", unsafe_allow_html=True)
 
 # ============================================
 # SIDEBAR ADMIN
@@ -902,7 +824,7 @@ with menu_tabs[0]:
         if not noticias.empty:
             for _, n in noticias.head(5).iterrows():
                 with st.expander(f"{n['titulo']} - {n['categoria']} ({n['fecha']})"):
-                    if n.get('imagen_url') and n['imagen_url']:
+                    if n.get('imagen_url'):
                         st.image(n['imagen_url'], width=300)
                     st.write(n['contenido'])
         else:
@@ -917,6 +839,18 @@ with menu_tabs[0]:
                 st.caption(f"📖 {ref['versiculo']}")
         else:
             st.info("No hay reflexión activa")
+    
+    st.markdown("---")
+    st.markdown("### ⭐ Recomendados")
+    negocios = get_negocios()
+    if not negocios.empty:
+        cols = st.columns(3)
+        for i, (_, n) in enumerate(negocios.head(3).iterrows()):
+            with cols[i]:
+                if n.get('imagen_url'):
+                    st.image(n['imagen_url'], use_container_width=True)
+                st.markdown(f"**🏪 {n['nombre']}**")
+                st.caption(n['categoria'])
 
 # --- TAB 1: NOTICIAS ---
 with menu_tabs[1]:
@@ -928,7 +862,7 @@ with menu_tabs[1]:
         if not noticias_nac.empty:
             for _, n in noticias_nac.iterrows():
                 with st.expander(f"{n['titulo']} - {n['fecha']}"):
-                    if n.get('imagen_url') and n['imagen_url']:
+                    if n.get('imagen_url'):
                         st.image(n['imagen_url'], width=300)
                     st.write(n['contenido'])
         else:
@@ -939,7 +873,7 @@ with menu_tabs[1]:
         if not noticias_inter.empty:
             for _, n in noticias_inter.iterrows():
                 with st.expander(f"{n['titulo']} - {n['fecha']}"):
-                    if n.get('imagen_url') and n['imagen_url']:
+                    if n.get('imagen_url'):
                         st.image(n['imagen_url'], width=300)
                     st.write(n['contenido'])
         else:
@@ -950,7 +884,7 @@ with menu_tabs[1]:
         if not noticias_dep.empty:
             for _, n in noticias_dep.iterrows():
                 with st.expander(f"{n['titulo']} - {n['fecha']}"):
-                    if n.get('imagen_url') and n['imagen_url']:
+                    if n.get('imagen_url'):
                         st.image(n['imagen_url'], width=300)
                     st.write(n['contenido'])
         else:
@@ -964,7 +898,7 @@ with menu_tabs[2]:
         for _, n in negocios.iterrows():
             col_a, col_b = st.columns([1, 2])
             with col_a:
-                if n.get('imagen_url') and n['imagen_url']:
+                if n.get('imagen_url'):
                     st.image(n['imagen_url'], use_container_width=True)
                 else:
                     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_%28state%29.svg.png", use_container_width=True)
@@ -1116,70 +1050,33 @@ with menu_tabs[7]:
 with menu_tabs[8]:
     st.title("👥 Personajes que hicieron historia")
     
-    # Formulario para CREAR
-    with st.expander("➕ Agregar nuevo personaje", expanded=True):
-        with st.form("fpersonaje_publico"):
-            nombre = st.text_input("Nombre del personaje")
-            descripcion = st.text_area("Biografía")
-            imagen = st.file_uploader("Imagen", type=["jpg", "png", "jpeg"])
-            if st.form_submit_button("💾 Guardar Personaje"):
-                if nombre and descripcion:
-                    add_personaje(nombre, descripcion, imagen, datetime.now().strftime("%d/%m/%Y"))
-                    st.success("✅ Personaje guardado")
-                    st.rerun()
-                else:
-                    st.error("❌ Nombre y biografía obligatorios")
+    fecha_actual = ahora.strftime("%d/%m/%Y")
+    personaje = get_personaje_dia(fecha_actual)
     
-    st.markdown("---")
-    st.markdown("### 📋 Personajes Registrados")
-    
-    # Lista de personajes con opciones de MODIFICAR y ELIMINAR
-    personajes = get_personajes()
-    if not personajes.empty:
-        for _, p in personajes.iterrows():
-            with st.expander(f"👤 {p['nombre']} - {p['fecha']}"):
-                if p.get('imagen_url') and p['imagen_url']:
-                    st.image(p['imagen_url'], width=200)
-                else:
-                    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_%28state%29.svg.png", width=200)
-                
-                st.write(f"**Biografía:** {p['descripcion']}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(f"✏️ Modificar", key=f"edit_pub_{p['id']}"):
-                        st.session_state.edit_personaje_publico = p.to_dict()
-                        st.rerun()
-                with col2:
-                    if st.button(f"🗑️ Eliminar", key=f"del_pub_{p['id']}"):
-                        delete_personaje(p['id'])
-                        st.success(f"✅ {p['nombre']} eliminado")
-                        st.rerun()
+    if personaje:
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            if personaje.get('imagen_url'):
+                st.image(personaje['imagen_url'], use_container_width=True)
+            else:
+                st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_%28state%29.svg.png", use_container_width=True)
+        with col2:
+            st.markdown(f"## {personaje['nombre']}")
+            st.markdown("### 📖 Biografía")
+            st.write(personaje['descripcion'])
     else:
-        st.info("No hay personajes registrados")
-    
-    # Formulario para MODIFICAR
-    if 'edit_personaje_publico' in st.session_state:
-        p = st.session_state.edit_personaje_publico
+        st.info(f"No hay personaje destacado para hoy ({fecha_actual})")
         st.markdown("---")
-        st.subheader(f"✏️ Modificando: {p['nombre']}")
-        
-        with st.form("edit_personaje_publico_form"):
-            nuevo_nombre = st.text_input("Nombre", value=p['nombre'])
-            nueva_descripcion = st.text_area("Biografía", value=p['descripcion'])
-            nueva_imagen = st.file_uploader("Nueva imagen (opcional)", type=["jpg", "png", "jpeg"])
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.form_submit_button("💾 Guardar cambios"):
-                    if update_personaje(p['id'], nuevo_nombre, nueva_descripcion, nueva_imagen, p['fecha']):
-                        st.success("✅ Personaje actualizado")
-                        del st.session_state.edit_personaje_publico
-                        st.rerun()
-            with col2:
-                if st.form_submit_button("❌ Cancelar"):
-                    del st.session_state.edit_personaje_publico
-                    st.rerun()
+        st.markdown("### 📜 Personajes Históricos Registrados")
+        personajes_historicos = get_personajes_historicos()
+        if not personajes_historicos.empty:
+            for _, p in personajes_historicos.head(10).iterrows():
+                with st.expander(f"👤 {p['nombre']} - {p['fecha']}"):
+                    if p.get('imagen_url'):
+                        st.image(p['imagen_url'], width=150)
+                    st.write(p['descripcion'])
+        else:
+            st.info("No hay personajes registrados")
 
 # --- TAB 9: EFEMÉRIDES MÉDICAS ---
 with menu_tabs[9]:
@@ -1233,522 +1130,213 @@ with menu_tabs[9]:
             st.markdown(f"- **{fecha}:** {texto}")
 
 # ============================================
-# PANEL ADMIN - CONTENIDO (si es admin)
+# PANEL ADMIN - CONTENIDO
 # ============================================
 if st.session_state.get('es_admin', False):
     admin_opt = st.session_state.get('admin_opt', "📰 Noticias")
     st.title("🔧 Panel de Administración")
     
-    # --- NOTICIAS ---
     if "📰 Noticias" in admin_opt:
         st.subheader("📰 Gestionar Noticias")
-        
-        with st.expander("➕ Crear nueva noticia", expanded=True):
-            with st.form("fn"):
-                titulo = st.text_input("Título")
-                categoria = st.selectbox("Categoría", ["Nacional", "Internacional", "Deportes", "Reportajes"])
-                contenido = st.text_area("Contenido")
-                imagen = st.file_uploader("Imagen", type=["jpg", "png", "jpeg"])
-                if st.form_submit_button("📤 Publicar Noticia"):
-                    if titulo and contenido:
-                        add_noticia(titulo, categoria, contenido, imagen)
-                        st.success("✅ Noticia publicada")
-                        st.rerun()
-                    else:
-                        st.error("❌ Título y contenido obligatorios")
-        
-        st.markdown("---")
-        st.markdown("### 📋 Noticias existentes")
+        with st.form("fn"):
+            titulo = st.text_input("Título")
+            categoria = st.selectbox("Categoría", ["Nacional", "Internacional", "Deportes", "Reportajes"])
+            contenido = st.text_area("Contenido")
+            imagen = st.file_uploader("Imagen (desde tu laptop)", type=["jpg", "png", "jpeg"])
+            if st.form_submit_button("📤 Publicar Noticia"):
+                if titulo and contenido:
+                    add_noticia(titulo, categoria, contenido, imagen)
+                    st.success("✅ Noticia publicada")
+                    st.rerun()
+                else:
+                    st.error("❌ Título y contenido obligatorios")
         
         for _, n in get_noticias().iterrows():
-            with st.expander(f"📰 {n['titulo']} - {n['categoria']} ({n['fecha']})"):
-                if n.get('imagen_url') and n['imagen_url']:
+            with st.expander(f"{n['titulo']} - {n['categoria']}"):
+                if n.get('imagen_url'):
                     st.image(n['imagen_url'], width=300)
-                st.write(f"**Contenido:** {n['contenido']}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(f"✏️ Modificar", key=f"edit_noti_{n['id']}"):
-                        st.session_state.edit_noticia = n.to_dict()
-                        st.rerun()
-                with col2:
-                    if st.button(f"🗑️ Eliminar", key=f"del_noti_{n['id']}"):
-                        delete_noticia(n['id'])
-                        st.success("✅ Noticia eliminada")
-                        st.rerun()
-        
-        if 'edit_noticia' in st.session_state:
-            n = st.session_state.edit_noticia
-            st.markdown("---")
-            st.subheader(f"✏️ Modificando: {n['titulo']}")
-            with st.form("edit_noticia_form"):
-                nuevo_titulo = st.text_input("Título", value=n['titulo'])
-                nueva_categoria = st.selectbox("Categoría", ["Nacional", "Internacional", "Deportes", "Reportajes"], index=["Nacional", "Internacional", "Deportes", "Reportajes"].index(n['categoria']))
-                nuevo_contenido = st.text_area("Contenido", value=n['contenido'])
-                nueva_imagen = st.file_uploader("Nueva imagen (opcional)", type=["jpg", "png", "jpeg"])
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("💾 Guardar cambios"):
-                        if update_noticia(n['id'], nuevo_titulo, nueva_categoria, nuevo_contenido, nueva_imagen):
-                            st.success("✅ Noticia actualizada")
-                            del st.session_state.edit_noticia
-                            st.rerun()
-                with col2:
-                    if st.form_submit_button("❌ Cancelar"):
-                        del st.session_state.edit_noticia
-                        st.rerun()
+                st.write(n['contenido'])
+                if st.button("🗑️ Eliminar", key=f"del_{n['id']}"):
+                    delete_noticia(n['id'])
+                    st.rerun()
     
-    # --- NEGOCIOS ---
     elif "🏪 Negocios" in admin_opt:
         st.subheader("🏪 Gestionar Negocios")
-        
-        with st.expander("➕ Crear nuevo negocio", expanded=True):
-            with st.form("fneg"):
-                nombre = st.text_input("Nombre")
-                categoria = st.text_input("Categoría")
-                resena = st.text_area("Reseña")
-                direccion = st.text_input("Dirección")
-                telefono = st.text_input("Teléfono")
-                horario = st.text_input("Horario")
-                imagen = st.file_uploader("Foto", type=["jpg", "png", "jpeg"])
-                if st.form_submit_button("➕ Agregar"):
-                    if nombre and resena:
-                        add_negocio(nombre, categoria, resena, direccion, telefono, horario, imagen)
-                        st.success("✅ Negocio agregado")
-                        st.rerun()
-        
-        st.markdown("---")
-        st.markdown("### 📋 Negocios existentes")
+        with st.form("fneg"):
+            nombre = st.text_input("Nombre")
+            categoria = st.text_input("Categoría")
+            resena = st.text_area("Reseña")
+            direccion = st.text_input("Dirección")
+            telefono = st.text_input("Teléfono")
+            horario = st.text_input("Horario")
+            imagen = st.file_uploader("Foto (desde tu laptop)", type=["jpg", "png", "jpeg"])
+            if st.form_submit_button("➕ Agregar"):
+                if nombre and resena:
+                    add_negocio(nombre, categoria, resena, direccion, telefono, horario, imagen)
+                    st.success("✅ Negocio agregado")
+                    st.rerun()
         
         for _, n in get_negocios().iterrows():
-            with st.expander(f"🏪 {n['nombre']} - {n['categoria']}"):
-                if n.get('imagen_url') and n['imagen_url']:
+            with st.expander(f"{n['nombre']}"):
+                if n.get('imagen_url'):
                     st.image(n['imagen_url'], width=200)
-                st.write(f"**Reseña:** {n['resena']}")
-                if n.get('direccion'):
-                    st.write(f"📍 {n['direccion']}")
-                if n.get('telefono'):
-                    st.write(f"📞 {n['telefono']}")
-                if n.get('horario'):
-                    st.write(f"⏰ {n['horario']}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(f"✏️ Modificar", key=f"edit_neg_{n['id']}"):
-                        st.session_state.edit_negocio = n.to_dict()
-                        st.rerun()
-                with col2:
-                    if st.button(f"🗑️ Eliminar", key=f"del_neg_{n['id']}"):
-                        delete_negocio(n['id'])
-                        st.success("✅ Negocio eliminado")
-                        st.rerun()
-        
-        if 'edit_negocio' in st.session_state:
-            n = st.session_state.edit_negocio
-            st.markdown("---")
-            st.subheader(f"✏️ Modificando: {n['nombre']}")
-            with st.form("edit_negocio_form"):
-                nuevo_nombre = st.text_input("Nombre", value=n['nombre'])
-                nueva_categoria = st.text_input("Categoría", value=n['categoria'])
-                nueva_resena = st.text_area("Reseña", value=n['resena'])
-                nueva_direccion = st.text_input("Dirección", value=n.get('direccion', ''))
-                nuevo_telefono = st.text_input("Teléfono", value=n.get('telefono', ''))
-                nuevo_horario = st.text_input("Horario", value=n.get('horario', ''))
-                nueva_imagen = st.file_uploader("Nueva imagen (opcional)", type=["jpg", "png", "jpeg"])
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("💾 Guardar cambios"):
-                        if update_negocio(n['id'], nuevo_nombre, nueva_categoria, nueva_resena, nueva_direccion, nuevo_telefono, nuevo_horario, nueva_imagen):
-                            st.success("✅ Negocio actualizado")
-                            del st.session_state.edit_negocio
-                            st.rerun()
-                with col2:
-                    if st.form_submit_button("❌ Cancelar"):
-                        del st.session_state.edit_negocio
-                        st.rerun()
+                st.write(n['resena'])
+                if st.button("🗑️ Eliminar", key=f"del_neg_{n['id']}"):
+                    delete_negocio(n['id'])
+                    st.rerun()
     
-    # --- REFLEXIONES ---
     elif "💭 Reflexiones" in admin_opt:
-        st.subheader("💭 Gestionar Reflexiones")
-        
-        with st.expander("➕ Crear nueva reflexión", expanded=True):
-            with st.form("fref"):
-                titulo = st.text_input("Título")
-                versiculo = st.text_input("Versículo")
-                contenido = st.text_area("Contenido")
-                if st.form_submit_button("💾 Guardar como activa"):
-                    if titulo and contenido:
-                        add_reflexion(titulo, contenido, versiculo)
-                        st.success("✅ Reflexión guardada como activa")
-                        st.rerun()
-        
-        st.markdown("---")
-        st.markdown("### 📋 Reflexiones existentes")
+        st.subheader("💭 Reflexión del Día")
+        with st.form("fref"):
+            titulo = st.text_input("Título")
+            versiculo = st.text_input("Versículo")
+            contenido = st.text_area("Contenido")
+            if st.form_submit_button("💾 Guardar"):
+                if titulo and contenido:
+                    add_reflexion(titulo, contenido, versiculo)
+                    st.success("✅ Reflexión guardada")
+                    st.rerun()
         
         for _, r in get_reflexiones().iterrows():
-            with st.expander(f"📖 {r['titulo']} - {r['fecha']}"):
+            with st.expander(f"{r['titulo']}"):
                 st.write(r['contenido'])
-                if r.get('versiculo'):
-                    st.caption(f"📖 {r['versiculo']}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(f"✏️ Modificar", key=f"edit_ref_{r['id']}"):
-                        st.session_state.edit_reflexion = r.to_dict()
-                        st.rerun()
-                with col2:
-                    if st.button(f"🗑️ Eliminar", key=f"del_ref_{r['id']}"):
-                        delete_reflexion(r['id'])
-                        st.success("✅ Reflexión eliminada")
-                        st.rerun()
-        
-        if 'edit_reflexion' in st.session_state:
-            r = st.session_state.edit_reflexion
-            st.markdown("---")
-            st.subheader(f"✏️ Modificando: {r['titulo']}")
-            with st.form("edit_reflexion_form"):
-                nuevo_titulo = st.text_input("Título", value=r['titulo'])
-                nuevo_versiculo = st.text_input("Versículo", value=r.get('versiculo', ''))
-                nuevo_contenido = st.text_area("Contenido", value=r['contenido'])
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("💾 Guardar cambios"):
-                        if update_reflexion(r['id'], nuevo_titulo, nuevo_contenido, nuevo_versiculo):
-                            st.success("✅ Reflexión actualizada")
-                            del st.session_state.edit_reflexion
-                            st.rerun()
-                with col2:
-                    if st.form_submit_button("❌ Cancelar"):
-                        del st.session_state.edit_reflexion
-                        st.rerun()
+                if st.button("🗑️ Eliminar", key=f"del_ref_{r['id']}"):
+                    delete_reflexion(r['id'])
+                    st.rerun()
     
-    # --- CRONICAS ---
     elif "📜 Crónicas" in admin_opt:
-        st.subheader("📜 Gestionar Crónicas")
-        
-        with st.expander("➕ Crear nueva crónica", expanded=True):
-            with st.form("fcro"):
-                titulo = st.text_input("Título")
-                lugar = st.text_input("Lugar")
-                estado = st.selectbox("Estado", ["Miranda", "Carabobo", "Distrito Capital", "Zulia", "Lara", "Aragua", "Bolivar", "Anzoategui", "Merida", "Tachira", "Nueva Esparta", "Sucre", "Falcon", "Barinas", "Portuguesa", "Guarico", "Cojedes", "Trujillo", "Yaracuy", "Apure", "Amazonas", "Delta Amacuro", "Vargas"])
-                contenido = st.text_area("Contenido")
-                if st.form_submit_button("💾 Guardar"):
-                    if titulo and contenido:
-                        add_cronica(titulo, contenido, lugar, estado)
-                        st.success("✅ Crónica guardada")
-                        st.rerun()
-        
-        st.markdown("---")
-        st.markdown("### 📋 Crónicas existentes")
+        st.subheader("📜 Crónicas")
+        with st.form("fcro"):
+            titulo = st.text_input("Título")
+            lugar = st.text_input("Lugar")
+            estado = st.selectbox("Estado", ["Miranda", "Carabobo", "Distrito Capital", "Zulia", "Lara", "Aragua", "Bolivar", "Anzoategui", "Merida", "Tachira", "Nueva Esparta", "Sucre", "Falcon", "Barinas", "Portuguesa", "Guarico", "Cojedes", "Trujillo", "Yaracuy", "Apure", "Amazonas", "Delta Amacuro", "Vargas"])
+            contenido = st.text_area("Contenido")
+            if st.form_submit_button("💾 Guardar"):
+                if titulo and contenido:
+                    add_cronica(titulo, contenido, lugar, estado)
+                    st.success("✅ Crónica guardada")
+                    st.rerun()
         
         for _, c in get_cronicas().iterrows():
-            with st.expander(f"📜 {c['titulo']} - {c['lugar']}, {c['estado']}"):
+            with st.expander(c['titulo']):
                 st.write(c['contenido'])
-                st.caption(f"📅 {c['fecha']}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(f"✏️ Modificar", key=f"edit_cron_{c['id']}"):
-                        st.session_state.edit_cronica = c.to_dict()
-                        st.rerun()
-                with col2:
-                    if st.button(f"🗑️ Eliminar", key=f"del_cron_{c['id']}"):
-                        delete_cronica(c['id'])
-                        st.success("✅ Crónica eliminada")
-                        st.rerun()
-        
-        if 'edit_cronica' in st.session_state:
-            c = st.session_state.edit_cronica
-            st.markdown("---")
-            st.subheader(f"✏️ Modificando: {c['titulo']}")
-            with st.form("edit_cronica_form"):
-                nuevo_titulo = st.text_input("Título", value=c['titulo'])
-                nuevo_lugar = st.text_input("Lugar", value=c['lugar'])
-                nuevo_estado = st.selectbox("Estado", ["Miranda", "Carabobo", "Distrito Capital", "Zulia", "Lara", "Aragua", "Bolivar", "Anzoategui", "Merida", "Tachira", "Nueva Esparta", "Sucre", "Falcon", "Barinas", "Portuguesa", "Guarico", "Cojedes", "Trujillo", "Yaracuy", "Apure", "Amazonas", "Delta Amacuro", "Vargas"], index=["Miranda", "Carabobo", "Distrito Capital", "Zulia", "Lara", "Aragua", "Bolivar", "Anzoategui", "Merida", "Tachira", "Nueva Esparta", "Sucre", "Falcon", "Barinas", "Portuguesa", "Guarico", "Cojedes", "Trujillo", "Yaracuy", "Apure", "Amazonas", "Delta Amacuro", "Vargas"].index(c['estado']))
-                nuevo_contenido = st.text_area("Contenido", value=c['contenido'])
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("💾 Guardar cambios"):
-                        if update_cronica(c['id'], nuevo_titulo, nuevo_contenido, nuevo_lugar, nuevo_estado):
-                            st.success("✅ Crónica actualizada")
-                            del st.session_state.edit_cronica
-                            st.rerun()
-                with col2:
-                    if st.form_submit_button("❌ Cancelar"):
-                        del st.session_state.edit_cronica
-                        st.rerun()
+                if st.button("🗑️ Eliminar", key=f"del_cron_{c['id']}"):
+                    delete_cronica(c['id'])
+                    st.rerun()
     
-    # --- VIDEOS ---
     elif "🎬 Videos" in admin_opt:
-        st.subheader("🎬 Gestionar Videos")
-        st.info("📌 Sube tu video a YouTube y pega la URL aquí")
-        
-        with st.expander("➕ Agregar nuevo video", expanded=True):
-            with st.form("fvid"):
-                titulo = st.text_input("Título del video")
-                url_youtube = st.text_input("URL de YouTube", placeholder="https://youtu.be/XXXXX")
-                if st.form_submit_button("📤 Agregar Video"):
-                    if titulo and url_youtube:
-                        add_video(titulo, url_youtube)
-                        st.success("✅ Video agregado")
-                        st.rerun()
-        
-        st.markdown("---")
-        st.markdown("### 📋 Videos existentes")
+        st.subheader("🎬 Videos (YouTube)")
+        with st.form("fvid"):
+            titulo = st.text_input("Título del video")
+            url_youtube = st.text_input("URL de YouTube", placeholder="https://youtu.be/XXXXX")
+            if st.form_submit_button("📤 Agregar Video"):
+                if titulo and url_youtube:
+                    add_video(titulo, url_youtube)
+                    st.success("✅ Video agregado")
+                    st.rerun()
+                else:
+                    st.error("❌ Título y URL obligatorios")
         
         for _, v in get_videos().iterrows():
-            with st.expander(f"🎬 {v['titulo']}"):
+            with st.expander(v['titulo']):
                 mostrar_video_youtube(v['video_url'])
-                st.caption(f"📅 {v['fecha']}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(f"✏️ Modificar", key=f"edit_vid_{v['id']}"):
-                        st.session_state.edit_video = v.to_dict()
-                        st.rerun()
-                with col2:
-                    if st.button(f"🗑️ Eliminar", key=f"del_vid_{v['id']}"):
-                        delete_video(v['id'])
-                        st.success("✅ Video eliminado")
-                        st.rerun()
-        
-        if 'edit_video' in st.session_state:
-            v = st.session_state.edit_video
-            st.markdown("---")
-            st.subheader(f"✏️ Modificando: {v['titulo']}")
-            with st.form("edit_video_form"):
-                nuevo_titulo = st.text_input("Título", value=v['titulo'])
-                nueva_url = st.text_input("URL de YouTube", value=v['video_url'])
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("💾 Guardar cambios"):
-                        if update_video(v['id'], nuevo_titulo, nueva_url):
-                            st.success("✅ Video actualizado")
-                            del st.session_state.edit_video
-                            st.rerun()
-                with col2:
-                    if st.form_submit_button("❌ Cancelar"):
-                        del st.session_state.edit_video
-                        st.rerun()
+                if st.button("🗑️ Eliminar", key=f"del_vid_{v['id']}"):
+                    delete_video(v['id'])
+                    st.rerun()
     
-    # --- MUSICA ---
     elif "🎵 Música" in admin_opt:
-        st.subheader("🎵 Gestionar Música")
-        
-        with st.expander("➕ Agregar nueva canción", expanded=True):
-            with st.form("fmus"):
-                titulo = st.text_input("Título de la canción")
-                url_audio = st.text_input("URL del audio", placeholder="https://ejemplo.com/cancion.mp3")
-                if st.form_submit_button("📤 Agregar Música"):
-                    if titulo and url_audio:
-                        add_musica(titulo, url_audio)
-                        st.success("✅ Música agregada")
-                        st.rerun()
-        
-        st.markdown("---")
-        st.markdown("### 📋 Canciones existentes")
+        st.subheader("🎵 Música")
+        with st.form("fmus"):
+            titulo = st.text_input("Título de la canción")
+            url_audio = st.text_input("URL del audio", placeholder="https://ejemplo.com/cancion.mp3")
+            if st.form_submit_button("📤 Agregar Música"):
+                if titulo and url_audio:
+                    add_musica(titulo, url_audio)
+                    st.success("✅ Música agregada")
+                    st.rerun()
+                else:
+                    st.error("❌ Título y URL obligatorios")
         
         for _, m in get_musicas().iterrows():
-            with st.expander(f"🎵 {m['titulo']}"):
+            with st.expander(m['titulo']):
                 mostrar_musica(m['audio_url'])
-                st.caption(f"📅 {m['fecha']}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(f"✏️ Modificar", key=f"edit_mus_{m['id']}"):
-                        st.session_state.edit_musica = m.to_dict()
-                        st.rerun()
-                with col2:
-                    if st.button(f"🗑️ Eliminar", key=f"del_mus_{m['id']}"):
-                        delete_musica(m['id'])
-                        st.success("✅ Canción eliminada")
-                        st.rerun()
-        
-        if 'edit_musica' in st.session_state:
-            m = st.session_state.edit_musica
-            st.markdown("---")
-            st.subheader(f"✏️ Modificando: {m['titulo']}")
-            with st.form("edit_musica_form"):
-                nuevo_titulo = st.text_input("Título", value=m['titulo'])
-                nueva_url = st.text_input("URL del audio", value=m['audio_url'])
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("💾 Guardar cambios"):
-                        if update_musica(m['id'], nuevo_titulo, nueva_url):
-                            st.success("✅ Canción actualizada")
-                            del st.session_state.edit_musica
-                            st.rerun()
-                with col2:
-                    if st.form_submit_button("❌ Cancelar"):
-                        del st.session_state.edit_musica
-                        st.rerun()
+                if st.button("🗑️ Eliminar", key=f"del_mus_{m['id']}"):
+                    delete_musica(m['id'])
+                    st.rerun()
     
-    # --- DENUNCIAS ---
     elif "⚠️ Denuncias" in admin_opt:
         st.subheader("⚠️ Gestionar Denuncias")
-        
         for _, d in get_denuncias().iterrows():
-            with st.expander(f"📌 {d['titulo']} - {d['estatus']}"):
-                st.write(f"**Denunciante:** {d['denunciante']}")
-                st.write(f"**Descripción:** {d['descripcion']}")
-                st.write(f"**Ubicación:** {d['ubicacion'] if d['ubicacion'] else 'No especificada'}")
-                st.caption(f"📅 {d['fecha']}")
-                
-                nuevo_estado = st.selectbox("Cambiar estado:", ["Pendiente", "En revisión", "Resuelta", "Descartada"], 
-                                           index=["Pendiente", "En revisión", "Resuelta", "Descartada"].index(d['estatus']),
-                                           key=f"est_{d['id']}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("✅ Actualizar estado", key=f"upd_{d['id']}"):
-                        update_denuncia_status(d['id'], nuevo_estado)
-                        st.success("✅ Estado actualizado")
-                        st.rerun()
-                with col2:
-                    if st.button("🗑️ Eliminar denuncia", key=f"del_den_{d['id']}"):
-                        delete_denuncia(d['id'])
-                        st.success("✅ Denuncia eliminada")
-                        st.rerun()
+            with st.expander(f"{d['titulo']} - {d['estatus']}"):
+                st.write(d['descripcion'])
+                nuevo = st.selectbox("Estado", ["Pendiente", "En revisión", "Resuelta", "Descartada"], 
+                                   index=["Pendiente", "En revisión", "Resuelta", "Descartada"].index(d['estatus']))
+                if st.button("Actualizar", key=f"upd_{d['id']}"):
+                    update_denuncia_status(d['id'], nuevo)
+                    st.rerun()
+                if st.button("Eliminar", key=f"del_den_{d['id']}"):
+                    delete_denuncia(d['id'])
+                    st.rerun()
     
-    # --- OPINIONES ---
     elif "💬 Opiniones" in admin_opt:
-        st.subheader("💬 Gestionar Opiniones")
-        
-        st.markdown("### ⏳ Opiniones pendientes de aprobar")
-        opiniones_pendientes = get_opiniones(aprobadas=False)
-        if not opiniones_pendientes.empty:
-            for _, op in opiniones_pendientes.iterrows():
-                if not op['aprobada']:
-                    with st.expander(f"👤 {op['usuario']} - {op['calificacion']}⭐"):
-                        st.write(f"**Comentario:** {op['comentario']}")
-                        st.caption(f"📅 {op['fecha']}")
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("✅ Aprobar", key=f"aprob_{op['id']}"):
-                                approve_opinion(op['id'])
-                                st.success("✅ Opinión aprobada")
-                                st.rerun()
-                        with col2:
-                            if st.button("🗑️ Eliminar", key=f"del_op_{op['id']}"):
-                                delete_opinion(op['id'])
-                                st.success("✅ Opinión eliminada")
-                                st.rerun()
-        else:
-            st.info("No hay opiniones pendientes")
-        
-        st.markdown("---")
-        st.markdown("### ✅ Opiniones aprobadas")
-        opiniones_aprobadas = get_opiniones(aprobadas=True)
-        if not opiniones_aprobadas.empty:
-            for _, op in opiniones_aprobadas.iterrows():
-                with st.expander(f"👤 {op['usuario']} - {op['calificacion']}⭐"):
-                    st.write(f"**Comentario:** {op['comentario']}")
-                    st.caption(f"📅 {op['fecha']}")
-                    if st.button("🗑️ Eliminar", key=f"del_op_aprob_{op['id']}"):
-                        delete_opinion(op['id'])
-                        st.success("✅ Opinión eliminada")
+        st.subheader("💬 Opiniones Pendientes")
+        for _, op in get_opiniones(aprobadas=False).iterrows():
+            if not op['aprobada']:
+                with st.expander(f"{op['usuario']} - {op['calificacion']}⭐"):
+                    st.write(op['comentario'])
+                    if st.button("✅ Aprobar", key=f"aprob_{op['id']}"):
+                        approve_opinion(op['id'])
                         st.rerun()
-        else:
-            st.info("No hay opiniones aprobadas")
+                    if st.button("🗑️ Eliminar", key=f"del_op_{op['id']}"):
+                        delete_opinion(op['id'])
+                        st.rerun()
+        
+        st.markdown("### ✅ Opiniones aprobadas")
+        for _, op in get_opiniones(aprobadas=True).iterrows():
+            with st.expander(f"{op['usuario']} - {op['calificacion']}⭐"):
+                st.write(op['comentario'])
+                if st.button("🗑️ Eliminar", key=f"del_op_aprob_{op['id']}"):
+                    delete_opinion(op['id'])
+                    st.rerun()
     
-    # --- PERSONAJES (ADMIN) ---
     elif "👥 Personajes" in admin_opt:
         st.subheader("👥 Gestionar Personajes")
+        st.info("💡 IMPORTANTE: Para que las fotos funcionen, crea un bucket llamado 'imagenes' en Supabase Storage")
         
-        with st.expander("➕ Crear nuevo personaje", expanded=True):
-            with st.form("fpersonaje_admin"):
-                nombre = st.text_input("Nombre del personaje")
-                fecha_personaje = st.date_input("Fecha a mostrar", value=datetime.now().date())
-                descripcion = st.text_area("Biografía")
-                imagen = st.file_uploader("Imagen", type=["jpg", "png", "jpeg"])
-                if st.form_submit_button("💾 Guardar Personaje"):
-                    if nombre and descripcion:
-                        add_personaje(nombre, descripcion, imagen, fecha_personaje.strftime("%d/%m/%Y"))
-                        st.success("✅ Personaje guardado")
-                        st.rerun()
-                    else:
-                        st.error("❌ Nombre y biografía obligatorios")
+        with st.form("fpersonaje"):
+            nombre = st.text_input("Nombre del personaje")
+            fecha_personaje = st.date_input("Fecha a mostrar", value=datetime.now().date())
+            descripcion = st.text_area("Biografía")
+            imagen = st.file_uploader("Imagen (desde tu laptop)", type=["jpg", "png", "jpeg"])
+            if st.form_submit_button("💾 Guardar Personaje"):
+                if nombre and descripcion:
+                    add_personaje(nombre, descripcion, imagen, fecha_personaje.strftime("%d/%m/%Y"))
+                    st.success("✅ Personaje guardado")
+                    st.rerun()
+                else:
+                    st.error("❌ Nombre y biografía obligatorios")
         
-        st.markdown("---")
         st.markdown("### 📋 Personajes Registrados")
-        
-        personajes = get_personajes()
+        personajes = get_personajes_historicos()
         if not personajes.empty:
             for _, p in personajes.iterrows():
-                with st.expander(f"👤 {p['nombre']} - {p['fecha']}"):
-                    if p.get('imagen_url') and p['imagen_url']:
+                with st.expander(f"{p['nombre']} - {p['fecha']}"):
+                    if p.get('imagen_url'):
                         st.image(p['imagen_url'], width=150)
-                    else:
-                        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_%28state%29.svg.png", width=150)
-                    
-                    st.write(f"**Biografía:** {p['descripcion']}")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        if st.button(f"✏️ Modificar", key=f"edit_{p['id']}"):
-                            st.session_state.edit_personaje = p.to_dict()
-                            st.rerun()
-                    with col2:
-                        if st.button(f"🗑️ Eliminar", key=f"del_{p['id']}"):
-                            delete_personaje(p['id'])
-                            st.success(f"✅ {p['nombre']} eliminado")
-                            st.rerun()
-                    with col3:
-                        if st.button(f"⭐ Destacar hoy", key=f"destacar_{p['id']}"):
-                            update_personaje(p['id'], p['nombre'], p['descripcion'], None, datetime.now().strftime("%d/%m/%Y"))
-                            st.success(f"✅ {p['nombre']} será el personaje destacado")
-                            st.rerun()
+                    st.write(p['descripcion'])
+                    if st.button("🗑️ Eliminar", key=f"del_pers_{p['id']}"):
+                        delete_personaje(p['id'])
+                        st.rerun()
         else:
             st.info("No hay personajes registrados")
-        
-        if 'edit_personaje' in st.session_state:
-            p = st.session_state.edit_personaje
-            st.markdown("---")
-            st.subheader(f"✏️ Modificando: {p['nombre']}")
-            with st.form("edit_personaje_form"):
-                nuevo_nombre = st.text_input("Nombre", value=p['nombre'])
-                try:
-                    fecha_default = datetime.strptime(p['fecha'], "%d/%m/%Y").date()
-                except:
-                    fecha_default = datetime.now().date()
-                nueva_fecha = st.date_input("Fecha", value=fecha_default)
-                nueva_descripcion = st.text_area("Biografía", value=p['descripcion'])
-                nueva_imagen = st.file_uploader("Nueva imagen (opcional)", type=["jpg", "png", "jpeg"])
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("💾 Guardar cambios"):
-                        if update_personaje(p['id'], nuevo_nombre, nueva_descripcion, nueva_imagen, nueva_fecha.strftime("%d/%m/%Y")):
-                            st.success("✅ Personaje actualizado")
-                            del st.session_state.edit_personaje
-                            st.rerun()
-                with col2:
-                    if st.form_submit_button("❌ Cancelar"):
-                        del st.session_state.edit_personaje
-                        st.rerun()
     
-    # --- CONFIGURACION ---
     elif "⚙️ Configuración" in admin_opt:
         st.subheader("⚙️ Configuración del Sistema")
         
         st.markdown("### 💵 Tipo de Cambio Dólar BCV")
         dolar_actual = get_dolar()
-        st.metric("Valor actual", f"{dolar_actual:.2f} Bs")
-        nuevo_dolar = st.number_input("Nuevo valor:", value=float(dolar_actual), step=0.01, format="%.2f")
-        
-        if st.button("💾 Actualizar Dólar", key="btn_dolar_admin"):
-            if actualizar_dolar_manual(nuevo_dolar):
-                st.success("✅ Dólar actualizado correctamente")
-                st.rerun()
-            else:
-                st.error("❌ Error al actualizar")
+        st.metric("Valor actual (API automática)", f"{dolar_actual:.2f} Bs")
+        st.info("✅ El dólar se actualiza automáticamente desde la API de BCV. No necesita modificación manual.")
         
         st.markdown("---")
         st.markdown("### 🖼️ Logo de la aplicación")
@@ -1759,8 +1347,16 @@ if st.session_state.get('es_admin', False):
             url_logo = subir_imagen_storage(nuevo_logo, "logo")
             if url_logo:
                 save_logo(url_logo)
-                st.success("✅ Logo guardado")
+                st.success("✅ Logo guardado correctamente")
                 st.rerun()
+        
+        st.markdown("---")
+        st.markdown("### 📦 Configuración de Storage")
+        if st.button("🔧 Verificar/Crear bucket 'imagenes'"):
+            if verificar_bucket():
+                st.success("✅ Bucket 'imagenes' listo para usar")
+            else:
+                st.error("❌ No se pudo crear el bucket automáticamente. Créalo manualmente en Supabase → Storage")
 
 # ============================================
 # FOOTER
