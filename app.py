@@ -134,11 +134,32 @@ def subir_audio_storage(file, carpeta="musica"):
         return None
 
 def extraer_video_id(url_youtube):
-    if "youtu.be" in url_youtube:
-        return url_youtube.split("/")[-1].split("?")[0]
-    elif "watch?v=" in url_youtube:
-        return url_youtube.split("v=")[1].split("&")[0]
-    return url_youtube
+    """Extrae el ID del video de YouTube desde diferentes formatos de URL"""
+    if not url_youtube:
+        return None
+    
+    # Limpiar la URL
+    url_youtube = url_youtube.strip()
+    
+    # Patrones de YouTube
+    patterns = [
+        r'(?:youtube\.com\/watch\?v=)([\w-]+)',
+        r'(?:youtu\.be\/)([\w-]+)',
+        r'(?:youtube\.com\/embed\/)([\w-]+)',
+        r'(?:youtube\.com\/v\/)([\w-]+)',
+        r'(?:youtube\.com\/shorts\/)([\w-]+)'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url_youtube)
+        if match:
+            return match.group(1)
+    
+    # Si ya es solo el ID
+    if re.match(r'^[\w-]+$', url_youtube):
+        return url_youtube
+    
+    return None
 
 def mostrar_video_youtube(url_youtube):
     video_id = extraer_video_id(url_youtube)
@@ -224,7 +245,8 @@ def add_noticia(titulo, categoria, contenido, imagen):
         }
         supabase.table("noticias").insert(data).execute()
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al agregar noticia: {str(e)}")
         return False
 
 def update_noticia(id_, titulo, categoria, contenido, imagen):
@@ -245,7 +267,8 @@ def update_noticia(id_, titulo, categoria, contenido, imagen):
         }
         supabase.table("noticias").update(data).eq("id", id_).execute()
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al actualizar noticia: {str(e)}")
         return False
 
 def get_noticias(categoria=None):
@@ -352,12 +375,11 @@ def delete_opinion_negocio(id_):
     except Exception:
         return False
 
-# --- REFLEXIONES (CORREGIDO) ---
+# --- REFLEXIONES ---
 def add_reflexion(titulo, contenido, versiculo):
     try:
         ahora = get_fecha_hora_venezuela()
         
-        # Desactivar todas las reflexiones actuales
         try:
             supabase.table("reflexiones").update({"activo": False}).execute()
         except:
@@ -484,44 +506,84 @@ def delete_cronica(id_):
     except Exception:
         return False
 
-# --- VIDEOS ---
+# --- VIDEOS (CORREGIDO) ---
 def add_video(titulo, url_youtube):
     try:
+        # Validar que la URL sea de YouTube
+        if not url_youtube or url_youtube.strip() == "":
+            st.error("❌ La URL del video es obligatoria")
+            return False
+        
+        # Extraer el ID del video
+        video_id = extraer_video_id(url_youtube)
+        if not video_id:
+            st.error("❌ URL de YouTube no válida. Ejemplos válidos:\n- https://www.youtube.com/watch?v=XXXXX\n- https://youtu.be/XXXXX")
+            return False
+        
         ahora = get_fecha_hora_venezuela()
+        
+        # Guardar la URL limpia
+        video_url_limpia = f"https://www.youtube.com/watch?v={video_id}"
+        
         data = {
             "titulo": titulo,
-            "video_url": url_youtube,
+            "video_url": video_url_limpia,
             "formato": "youtube",
             "fecha": ahora.strftime("%d/%m/%Y")
         }
-        supabase.table("videos").insert(data).execute()
-        return True
-    except Exception:
+        
+        result = supabase.table("videos").insert(data).execute()
+        
+        if result.data:
+            st.success("✅ Video agregado correctamente")
+            return True
+        else:
+            st.error("❌ Error: No se pudo guardar el video")
+            return False
+            
+    except Exception as e:
+        st.error(f"❌ Error al agregar video: {str(e)}")
         return False
 
 def update_video(id_, titulo, url_youtube):
     try:
+        if not url_youtube or url_youtube.strip() == "":
+            st.error("❌ La URL del video es obligatoria")
+            return False
+        
+        video_id = extraer_video_id(url_youtube)
+        if not video_id:
+            st.error("❌ URL de YouTube no válida")
+            return False
+        
+        video_url_limpia = f"https://www.youtube.com/watch?v={video_id}"
+        
         data = {
             "titulo": titulo,
-            "video_url": url_youtube
+            "video_url": video_url_limpia
         }
         supabase.table("videos").update(data).eq("id", id_).execute()
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al actualizar video: {str(e)}")
         return False
 
 def get_videos():
     try:
         response = supabase.table("videos").select("*").order("id", desc=True).execute()
-        return pd.DataFrame(response.data)
-    except Exception:
+        if response.data:
+            return pd.DataFrame(response.data)
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error al obtener videos: {str(e)}")
         return pd.DataFrame()
 
 def delete_video(id_):
     try:
         supabase.table("videos").delete().eq("id", id_).execute()
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al eliminar video: {str(e)}")
         return False
 
 # --- MUSICA ---
@@ -1660,22 +1722,29 @@ if st.session_state.get('es_admin', False):
                         del st.session_state.edit_cronica
                         st.rerun()
     
-    # --- VIDEOS ---
+    # --- VIDEOS (CORREGIDO) ---
     elif "🎬 Videos" in admin_opt:
         st.subheader("🎬 Gestionar Videos")
         st.info("📌 Sube tu video a YouTube y pega la URL aquí")
+        st.info("Ejemplos de URLs válidas:\n- https://www.youtube.com/watch?v=dQw4w9WgXcQ\n- https://youtu.be/dQw4w9WgXcQ")
         
         with st.expander("➕ CREAR nuevo video", expanded=True):
             with st.form("fvid"):
                 titulo = st.text_input("Título del video *")
-                url_youtube = st.text_input("URL de YouTube *", placeholder="https://youtu.be/XXXXX o https://www.youtube.com/watch?v=XXXXX")
+                url_youtube = st.text_input("URL de YouTube *", placeholder="https://www.youtube.com/watch?v=XXXXX")
+                
+                # Mostrar preview del video si la URL es válida
+                if url_youtube and url_youtube.strip():
+                    video_id = extraer_video_id(url_youtube)
+                    if video_id:
+                        st.video(f"https://www.youtube.com/embed/{video_id}")
+                    else:
+                        st.warning("⚠️ URL no válida, usa el formato correcto")
+                
                 if st.form_submit_button("📤 Agregar Video"):
                     if titulo and url_youtube:
                         if add_video(titulo, url_youtube):
-                            st.success("✅ Video agregado")
                             st.rerun()
-                        else:
-                            st.error("❌ Error al agregar")
                     else:
                         st.error("❌ Título y URL son obligatorios")
         
@@ -1688,6 +1757,7 @@ if st.session_state.get('es_admin', False):
                 with st.expander(f"🎬 {v['titulo']}"):
                     mostrar_video_youtube(v['video_url'])
                     st.caption(f"📅 {v['fecha']}")
+                    st.caption(f"🔗 URL: {v['video_url']}")
                     
                     col1, col2 = st.columns(2)
                     with col1:
@@ -1709,6 +1779,11 @@ if st.session_state.get('es_admin', False):
             with st.form("edit_video_form"):
                 nuevo_titulo = st.text_input("Título", value=v['titulo'])
                 nueva_url = st.text_input("URL de YouTube", value=v['video_url'])
+                
+                if nueva_url:
+                    video_id = extraer_video_id(nueva_url)
+                    if video_id:
+                        st.video(f"https://www.youtube.com/embed/{video_id}")
                 
                 col1, col2 = st.columns(2)
                 with col1:
