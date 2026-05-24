@@ -102,7 +102,8 @@ def subir_imagen_storage(file, carpeta="imagenes"):
         
         url = supabase.storage.from_("imagenes").get_public_url(nombre_archivo)
         return url
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al subir imagen: {str(e)}")
         return None
 
 def subir_multiples_imagenes(files, carpeta):
@@ -264,7 +265,7 @@ def delete_noticia(id_):
     except Exception:
         return False
 
-# --- NEGOCIOS (SIMPLIFICADO) ---
+# --- NEGOCIOS ---
 def add_negocio(nombre, resena, google_maps_url, imagenes):
     try:
         ahora = get_fecha_hora_venezuela()
@@ -276,9 +277,10 @@ def add_negocio(nombre, resena, google_maps_url, imagenes):
             "imagenes_url": imagenes_urls,
             "fecha": ahora.strftime("%d/%m/%Y")
         }
-        supabase.table("negocios").insert(data).execute()
-        return True
-    except Exception:
+        result = supabase.table("negocios").insert(data).execute()
+        return True if result.data else False
+    except Exception as e:
+        st.error(f"Error al agregar negocio: {str(e)}")
         return False
 
 def update_negocio(id_, nombre, resena, google_maps_url, imagenes):
@@ -308,7 +310,8 @@ def get_negocios():
         if response.data:
             return pd.DataFrame(response.data)
         return pd.DataFrame()
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al obtener negocios: {str(e)}")
         return pd.DataFrame()
 
 def delete_negocio(id_):
@@ -744,7 +747,7 @@ if 'visitante_contado' not in st.session_state:
     st.session_state.visitante_contado = True
 
 # ============================================
-# ESTILOS - CON PESTAÑAS VISIBLES
+# ESTILOS - CON PESTAÑAS VISIBLES (CORREGIDO)
 # ============================================
 st.markdown("""
 <style>
@@ -772,32 +775,37 @@ st.markdown("""
 }
 
 /* ============================================ */
-/* PESTAÑAS (TABS) - CORREGIDO - VISIBLES */
+/* PESTAÑAS (TABS) - CORREGIDO CON TEXTO BLANCO */
 /* ============================================ */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 8px !important;
-    background-color: #1a1a1a !important;
-    border-radius: 15px !important;
-    padding: 8px !important;
+div[data-testid="stTabs"] {
+    background-color: transparent !important;
 }
 
-.stTabs [data-baseweb="tab"] {
+div[data-testid="stTabs"] button {
     background-color: #2a2a2a !important;
     border-radius: 12px !important;
     color: #FFFFFF !important;
     font-weight: bold !important;
     font-size: 16px !important;
     padding: 10px 20px !important;
+    margin: 0 4px !important;
+    border: none !important;
 }
 
-.stTabs [data-baseweb="tab"]:hover {
+div[data-testid="stTabs"] button:hover {
     background-color: #3a3a3a !important;
     color: #FFD700 !important;
 }
 
-.stTabs [aria-selected="true"] {
+div[data-testid="stTabs"] button[aria-selected="true"] {
     background: linear-gradient(135deg, #FFD700, #CF142B) !important;
     color: #FFFFFF !important;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.3) !important;
+}
+
+div[data-testid="stTabs"] button p {
+    color: inherit !important;
+    font-weight: bold !important;
 }
 
 /* Expanders */
@@ -945,7 +953,6 @@ with st.sidebar:
     if clave == "Juan*316*" or clave == "1966":
         es_admin = True
         st.success("✅ Acceso concedido")
-        # Mostrar dólar solo en el panel de admin para referencia
         st.caption(f"💵 Dólar actual: {dolar:.2f} Bs")
     elif clave:
         st.error("❌ Clave incorrecta")
@@ -1065,16 +1072,33 @@ with menu_tabs[1]:
 # --- TAB 2: DONDE IR - DONDE COMPRAR (NEGOCIOS) ---
 with menu_tabs[2]:
     st.title("📍 Donde ir - Donde comprar")
+    
+    # Mostrar mensaje de depuración si es admin
+    if st.session_state.get('es_admin', False):
+        with st.expander("🔧 Depuración - Ver datos en Supabase"):
+            try:
+                response = supabase.table("negocios").select("*").execute()
+                st.write(f"Total de negocios en BD: {len(response.data) if response.data else 0}")
+                if response.data:
+                    st.json(response.data)
+            except Exception as e:
+                st.error(f"Error al consultar: {str(e)}")
+    
     negocios = get_negocios()
+    
     if not negocios.empty:
+        st.success(f"✅ {len(negocios)} negocios encontrados")
         for _, n in negocios.iterrows():
             with st.expander(f"🏪 {n['nombre']}"):
+                # Mostrar imágenes
                 if n.get('imagenes_url') and n['imagenes_url']:
                     if isinstance(n['imagenes_url'], list):
                         for img_url in n['imagenes_url'][:2]:
                             mostrar_imagen_segura(img_url, 200)
                     elif isinstance(n['imagenes_url'], str):
                         mostrar_imagen_segura(n['imagenes_url'], 200)
+                else:
+                    st.caption("📷 Sin imágenes")
                 
                 st.write(f"**Reseña:** {n['resena']}")
                 if n.get('google_maps_url') and n['google_maps_url']:
@@ -1090,9 +1114,11 @@ with menu_tabs[2]:
                     calificacion = st.slider("Calificación", 1, 5, 5, key=f"calif_{n['id']}")
                     if st.form_submit_button("Enviar Opinión"):
                         if nombre_usuario and comentario:
-                            add_opinion_negocio(n['id'], nombre_usuario, comentario, calificacion)
-                            st.success("✅ Opinión enviada")
-                            st.rerun()
+                            if add_opinion_negocio(n['id'], nombre_usuario, comentario, calificacion):
+                                st.success("✅ Opinión enviada")
+                                st.rerun()
+                            else:
+                                st.error("❌ Error al enviar opinión")
                         else:
                             st.error("❌ Nombre y comentario son obligatorios")
                 
@@ -1107,7 +1133,8 @@ with menu_tabs[2]:
                 else:
                     st.info("No hay opiniones para este negocio. ¡Sé el primero en opinar!")
     else:
-        st.info("No hay negocios agregados")
+        st.warning("⚠️ No hay negocios agregados aún")
+        st.info("💡 Si eres administrador, ve al panel lateral → Negocios → CREAR nuevo negocio")
 
 # --- TAB 3: REFLEXIONES ---
 with menu_tabs[3]:
@@ -1206,9 +1233,11 @@ with menu_tabs[6]:
             ubic = st.text_input("Ubicación")
             if st.form_submit_button("Enviar Denuncia"):
                 if titulo and desc:
-                    add_denuncia(nombre, titulo, desc, ubic)
-                    st.success("✅ Denuncia enviada correctamente")
-                    st.balloons()
+                    if add_denuncia(nombre, titulo, desc, ubic):
+                        st.success("✅ Denuncia enviada correctamente")
+                        st.balloons()
+                    else:
+                        st.error("❌ Error al enviar denuncia")
                 else:
                     st.error("❌ Título y descripción son obligatorios")
     
@@ -1237,9 +1266,11 @@ with menu_tabs[7]:
             estrellas = st.slider("Calificación", 1, 5, 5)
             if st.form_submit_button("Enviar Opinión"):
                 if usuario and comentario:
-                    add_opinion(usuario, comentario, estrellas)
-                    st.success("✅ Opinión enviada, será revisada por un administrador")
-                    st.balloons()
+                    if add_opinion(usuario, comentario, estrellas):
+                        st.success("✅ Opinión enviada, será revisada por un administrador")
+                        st.balloons()
+                    else:
+                        st.error("❌ Error al enviar opinión")
                 else:
                     st.error("❌ Nombre y comentario son obligatorios")
     
@@ -1343,6 +1374,8 @@ if st.session_state.get('es_admin', False):
                         if add_noticia(titulo, categoria, contenido, imagen):
                             st.success("✅ Noticia guardada")
                             st.rerun()
+                        else:
+                            st.error("❌ Error al guardar noticia")
                     else:
                         st.error("❌ Título y contenido son obligatorios")
         
@@ -1363,9 +1396,11 @@ if st.session_state.get('es_admin', False):
                             st.rerun()
                     with col2:
                         if st.button(f"🗑️ ELIMINAR", key=f"del_noti_{n['id']}"):
-                            delete_noticia(n['id'])
-                            st.success("✅ Noticia eliminada")
-                            st.rerun()
+                            if delete_noticia(n['id']):
+                                st.success("✅ Noticia eliminada")
+                                st.rerun()
+                            else:
+                                st.error("❌ Error al eliminar")
         else:
             st.info("No hay noticias registradas")
         
@@ -1386,12 +1421,14 @@ if st.session_state.get('es_admin', False):
                             st.success("✅ Noticia actualizada")
                             del st.session_state.edit_noticia
                             st.rerun()
+                        else:
+                            st.error("❌ Error al actualizar")
                 with col2:
                     if st.form_submit_button("❌ Cancelar"):
                         del st.session_state.edit_noticia
                         st.rerun()
     
-    # --- NEGOCIOS (SIMPLIFICADO) ---
+    # --- NEGOCIOS ---
     elif "🏪 Negocios" in admin_opt:
         st.subheader("🏪 Gestionar Negocios")
         
@@ -1407,8 +1444,10 @@ if st.session_state.get('es_admin', False):
                 elif st.form_submit_button("➕ Agregar Negocio"):
                     if nombre and resena:
                         if add_negocio(nombre, resena, google_maps_url, imagenes):
-                            st.success("✅ Negocio agregado")
+                            st.success("✅ Negocio agregado correctamente")
                             st.rerun()
+                        else:
+                            st.error("❌ Error al agregar negocio. Verifica la conexión con Supabase.")
                     else:
                         st.error("❌ Nombre y reseña son obligatorios")
         
@@ -1417,6 +1456,7 @@ if st.session_state.get('es_admin', False):
         
         negocios = get_negocios()
         if not negocios.empty:
+            st.info(f"📌 Total: {len(negocios)} negocios registrados")
             for _, n in negocios.iterrows():
                 with st.expander(f"🏪 {n['nombre']}"):
                     if n.get('imagenes_url') and n['imagenes_url']:
@@ -1425,6 +1465,8 @@ if st.session_state.get('es_admin', False):
                                 mostrar_imagen_segura(img_url, 200)
                         elif isinstance(n['imagenes_url'], str):
                             mostrar_imagen_segura(n['imagenes_url'], 200)
+                    else:
+                        st.caption("📷 Sin imágenes")
                     
                     st.write(f"**Reseña:** {n['resena']}")
                     if n.get('google_maps_url') and n['google_maps_url']:
@@ -1441,8 +1483,8 @@ if st.session_state.get('es_admin', False):
                             st.write(f"\"{op['comentario']}\"")
                             st.caption(f"📅 {op['fecha']}")
                             if st.button(f"🗑️ Eliminar opinión", key=f"del_opinion_{op['id']}"):
-                                delete_opinion_negocio(op['id'])
-                                st.rerun()
+                                if delete_opinion_negocio(op['id']):
+                                    st.rerun()
                             st.divider()
                     else:
                         st.info("No hay opiniones para este negocio")
@@ -1454,11 +1496,13 @@ if st.session_state.get('es_admin', False):
                             st.rerun()
                     with col2:
                         if st.button(f"🗑️ ELIMINAR", key=f"del_neg_{n['id']}"):
-                            delete_negocio(n['id'])
-                            st.success("✅ Negocio eliminado")
-                            st.rerun()
+                            if delete_negocio(n['id']):
+                                st.success("✅ Negocio eliminado")
+                                st.rerun()
+                            else:
+                                st.error("❌ Error al eliminar")
         else:
-            st.info("No hay negocios registrados")
+            st.warning("⚠️ No hay negocios registrados. Usa el formulario de arriba para crear uno.")
         
         if 'edit_negocio' in st.session_state:
             n = st.session_state.edit_negocio
@@ -1470,16 +1514,19 @@ if st.session_state.get('es_admin', False):
                 nuevo_google_maps = st.text_input("Enlace Google Maps", value=n.get('google_maps_url', ''))
                 nuevas_imagenes = st.file_uploader("Nuevas fotos (opcional, máximo 3)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
                 
-                if len(nuevas_imagenes) > 3:
-                    st.error("Máximo 3 fotos")
-                elif st.form_submit_button("💾 Guardar cambios"):
-                    if update_negocio(n['id'], nuevo_nombre, nueva_resena, nuevo_google_maps, nuevas_imagenes):
-                        st.success("✅ Negocio actualizado")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("💾 Guardar cambios"):
+                        if update_negocio(n['id'], nuevo_nombre, nueva_resena, nuevo_google_maps, nuevas_imagenes):
+                            st.success("✅ Negocio actualizado")
+                            del st.session_state.edit_negocio
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al actualizar")
+                with col2:
+                    if st.form_submit_button("❌ Cancelar"):
                         del st.session_state.edit_negocio
                         st.rerun()
-                if st.form_submit_button("❌ Cancelar"):
-                    del st.session_state.edit_negocio
-                    st.rerun()
     
     # --- REFLEXIONES ---
     elif "💭 Reflexiones" in admin_opt:
@@ -1495,6 +1542,8 @@ if st.session_state.get('es_admin', False):
                         if add_reflexion(titulo, contenido, versiculo):
                             st.success("✅ Reflexión guardada")
                             st.rerun()
+                        else:
+                            st.error("❌ Error al guardar")
                     else:
                         st.error("❌ Título y contenido son obligatorios")
         
@@ -1516,9 +1565,9 @@ if st.session_state.get('es_admin', False):
                             st.rerun()
                     with col2:
                         if st.button(f"🗑️ ELIMINAR", key=f"del_ref_{r['id']}"):
-                            delete_reflexion(r['id'])
-                            st.success("✅ Reflexión eliminada")
-                            st.rerun()
+                            if delete_reflexion(r['id']):
+                                st.success("✅ Reflexión eliminada")
+                                st.rerun()
         else:
             st.info("No hay reflexiones registradas")
         
@@ -1559,9 +1608,11 @@ if st.session_state.get('es_admin', False):
                     st.error("Máximo 3 fotos por crónica")
                 elif st.form_submit_button("💾 Guardar Crónica"):
                     if titulo and contenido:
-                        add_cronica(titulo, contenido, lugar, estado, imagenes)
-                        st.success("✅ Crónica guardada")
-                        st.rerun()
+                        if add_cronica(titulo, contenido, lugar, estado, imagenes):
+                            st.success("✅ Crónica guardada")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al guardar")
                     else:
                         st.error("❌ Título y contenido son obligatorios")
         
@@ -1588,9 +1639,9 @@ if st.session_state.get('es_admin', False):
                             st.rerun()
                     with col2:
                         if st.button(f"🗑️ ELIMINAR", key=f"del_cron_{c['id']}"):
-                            delete_cronica(c['id'])
-                            st.success("✅ Crónica eliminada")
-                            st.rerun()
+                            if delete_cronica(c['id']):
+                                st.success("✅ Crónica eliminada")
+                                st.rerun()
         else:
             st.info("No hay crónicas registradas")
         
@@ -1628,9 +1679,11 @@ if st.session_state.get('es_admin', False):
                 url_youtube = st.text_input("URL de YouTube *", placeholder="https://youtu.be/XXXXX o https://www.youtube.com/watch?v=XXXXX")
                 if st.form_submit_button("📤 Agregar Video"):
                     if titulo and url_youtube:
-                        add_video(titulo, url_youtube)
-                        st.success("✅ Video agregado")
-                        st.rerun()
+                        if add_video(titulo, url_youtube):
+                            st.success("✅ Video agregado")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al agregar")
                     else:
                         st.error("❌ Título y URL son obligatorios")
         
@@ -1651,9 +1704,9 @@ if st.session_state.get('es_admin', False):
                             st.rerun()
                     with col2:
                         if st.button(f"🗑️ ELIMINAR", key=f"del_vid_{v['id']}"):
-                            delete_video(v['id'])
-                            st.success("✅ Video eliminado")
-                            st.rerun()
+                            if delete_video(v['id']):
+                                st.success("✅ Video eliminado")
+                                st.rerun()
         else:
             st.info("No hay videos registrados")
         
@@ -1688,9 +1741,11 @@ if st.session_state.get('es_admin', False):
                 audio_file = st.file_uploader("Archivo de audio (MP3) *", type=["mp3"])
                 if st.form_submit_button("📤 Agregar Música"):
                     if titulo and audio_file:
-                        add_musica(titulo, audio_file)
-                        st.success("✅ Música agregada")
-                        st.rerun()
+                        if add_musica(titulo, audio_file):
+                            st.success("✅ Música agregada")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al agregar")
                     else:
                         st.error("❌ Título y archivo de audio son obligatorios")
         
@@ -1711,9 +1766,9 @@ if st.session_state.get('es_admin', False):
                             st.rerun()
                     with col2:
                         if st.button(f"🗑️ ELIMINAR", key=f"del_mus_{m['id']}"):
-                            delete_musica(m['id'])
-                            st.success("✅ Música eliminada")
-                            st.rerun()
+                            if delete_musica(m['id']):
+                                st.success("✅ Música eliminada")
+                                st.rerun()
         else:
             st.info("No hay canciones registradas")
         
@@ -1757,13 +1812,13 @@ if st.session_state.get('es_admin', False):
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button("✅ Actualizar estado", key=f"upd_{d['id']}"):
-                            update_denuncia_status(d['id'], nuevo_estado)
-                            st.rerun()
+                            if update_denuncia_status(d['id'], nuevo_estado):
+                                st.rerun()
                     with col2:
                         if st.button("🗑️ ELIMINAR denuncia", key=f"del_den_{d['id']}"):
-                            delete_denuncia(d['id'])
-                            st.success("✅ Denuncia eliminada")
-                            st.rerun()
+                            if delete_denuncia(d['id']):
+                                st.success("✅ Denuncia eliminada")
+                                st.rerun()
         else:
             st.info("No hay denuncias registradas")
     
@@ -1783,12 +1838,12 @@ if st.session_state.get('es_admin', False):
                         col1, col2 = st.columns(2)
                         with col1:
                             if st.button("✅ APROBAR", key=f"aprob_{op['id']}"):
-                                approve_opinion(op['id'])
-                                st.rerun()
+                                if approve_opinion(op['id']):
+                                    st.rerun()
                         with col2:
                             if st.button("🗑️ ELIMINAR", key=f"del_op_{op['id']}"):
-                                delete_opinion(op['id'])
-                                st.rerun()
+                                if delete_opinion(op['id']):
+                                    st.rerun()
         else:
             st.info("No hay opiniones pendientes")
         
@@ -1801,8 +1856,8 @@ if st.session_state.get('es_admin', False):
                     st.write(f"**Comentario:** {op['comentario']}")
                     st.caption(f"📅 {op['fecha']}")
                     if st.button("🗑️ ELIMINAR", key=f"del_op_aprob_{op['id']}"):
-                        delete_opinion(op['id'])
-                        st.rerun()
+                        if delete_opinion(op['id']):
+                            st.rerun()
         else:
             st.info("No hay opiniones aprobadas")
     
@@ -1818,9 +1873,11 @@ if st.session_state.get('es_admin', False):
                 imagen = st.file_uploader("Imagen", type=["jpg", "png", "jpeg"])
                 if st.form_submit_button("💾 Guardar Personaje"):
                     if nombre and descripcion:
-                        add_personaje(nombre, descripcion, imagen, fecha_personaje.strftime("%d/%m/%Y"))
-                        st.success("✅ Personaje guardado")
-                        st.rerun()
+                        if add_personaje(nombre, descripcion, imagen, fecha_personaje.strftime("%d/%m/%Y")):
+                            st.success("✅ Personaje guardado")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al guardar")
                     else:
                         st.error("❌ Nombre y biografía obligatorios")
         
@@ -1841,14 +1898,14 @@ if st.session_state.get('es_admin', False):
                             st.rerun()
                     with col2:
                         if st.button(f"🗑️ ELIMINAR", key=f"del_{p['id']}"):
-                            delete_personaje(p['id'])
-                            st.success(f"✅ {p['nombre']} eliminado")
-                            st.rerun()
+                            if delete_personaje(p['id']):
+                                st.success(f"✅ {p['nombre']} eliminado")
+                                st.rerun()
                     with col3:
                         if st.button(f"⭐ DESTACAR HOY", key=f"destacar_{p['id']}"):
-                            update_personaje(p['id'], p['nombre'], p['descripcion'], None, datetime.now().strftime("%d/%m/%Y"))
-                            st.success(f"✅ {p['nombre']} será el personaje destacado")
-                            st.rerun()
+                            if update_personaje(p['id'], p['nombre'], p['descripcion'], None, datetime.now().strftime("%d/%m/%Y")):
+                                st.success(f"✅ {p['nombre']} será el personaje destacado")
+                                st.rerun()
         else:
             st.info("No hay personajes registrados")
         
@@ -1902,9 +1959,11 @@ if st.session_state.get('es_admin', False):
         if nuevo_logo and st.button("💾 Guardar Logo", key="btn_logo"):
             url_logo = subir_imagen_storage(nuevo_logo, "logo")
             if url_logo:
-                save_logo(url_logo)
-                st.success("✅ Logo guardado")
-                st.rerun()
+                if save_logo(url_logo):
+                    st.success("✅ Logo guardado")
+                    st.rerun()
+                else:
+                    st.error("❌ Error al guardar logo")
 
 # ============================================
 # FOOTER
