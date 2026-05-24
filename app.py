@@ -138,10 +138,8 @@ def extraer_video_id(url_youtube):
     if not url_youtube:
         return None
     
-    # Limpiar la URL
     url_youtube = url_youtube.strip()
     
-    # Patrones de YouTube
     patterns = [
         r'(?:youtube\.com\/watch\?v=)([\w-]+)',
         r'(?:youtu\.be\/)([\w-]+)',
@@ -155,16 +153,29 @@ def extraer_video_id(url_youtube):
         if match:
             return match.group(1)
     
-    # Si ya es solo el ID
     if re.match(r'^[\w-]+$', url_youtube):
         return url_youtube
     
     return None
 
-def mostrar_video_youtube(url_youtube):
+def mostrar_video_youtube(url_youtube, width_percent=25):
+    """Muestra video de YouTube con ancho personalizado"""
     video_id = extraer_video_id(url_youtube)
     if video_id:
-        st.video(f"https://www.youtube.com/embed/{video_id}")
+        # Usar HTML/CSS para controlar el ancho al 25%
+        html = f"""
+        <div style="width: {width_percent}%; margin: 0 auto;">
+            <iframe 
+                width="100%" 
+                height="auto" 
+                src="https://www.youtube.com/embed/{video_id}" 
+                frameborder="0" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                allowfullscreen>
+            </iframe>
+        </div>
+        """
+        st.markdown(html, unsafe_allow_html=True)
     else:
         st.error("URL de YouTube no válida")
 
@@ -509,20 +520,16 @@ def delete_cronica(id_):
 # --- VIDEOS (CORREGIDO) ---
 def add_video(titulo, url_youtube):
     try:
-        # Validar que la URL sea de YouTube
         if not url_youtube or url_youtube.strip() == "":
             st.error("❌ La URL del video es obligatoria")
             return False
         
-        # Extraer el ID del video
         video_id = extraer_video_id(url_youtube)
         if not video_id:
-            st.error("❌ URL de YouTube no válida. Ejemplos válidos:\n- https://www.youtube.com/watch?v=XXXXX\n- https://youtu.be/XXXXX")
+            st.error("❌ URL de YouTube no válida")
             return False
         
         ahora = get_fecha_hora_venezuela()
-        
-        # Guardar la URL limpia
         video_url_limpia = f"https://www.youtube.com/watch?v={video_id}"
         
         data = {
@@ -1243,12 +1250,15 @@ with menu_tabs[5]:
     tab_vid, tab_mus, tab_rad = st.tabs(["🎥 Videos", "🎵 Música", "📻 Radio"])
     
     with tab_vid:
+        st.markdown("### 🎥 Videos al 25% de tamaño")
         videos = get_videos()
         if not videos.empty:
             for _, v in videos.iterrows():
                 with st.expander(f"🎬 {v['titulo']}"):
-                    mostrar_video_youtube(v['video_url'])
+                    # Mostrar video al 25% del ancho
+                    mostrar_video_youtube(v['video_url'], width_percent=25)
                     st.caption(f"📅 {v['fecha']}")
+                    st.caption(f"🔗 {v['video_url']}")
         else:
             st.info("No hay videos disponibles")
     
@@ -1722,7 +1732,7 @@ if st.session_state.get('es_admin', False):
                         del st.session_state.edit_cronica
                         st.rerun()
     
-    # --- VIDEOS (CORREGIDO) ---
+    # --- VIDEOS ---
     elif "🎬 Videos" in admin_opt:
         st.subheader("🎬 Gestionar Videos")
         st.info("📌 Sube tu video a YouTube y pega la URL aquí")
@@ -1733,13 +1743,12 @@ if st.session_state.get('es_admin', False):
                 titulo = st.text_input("Título del video *")
                 url_youtube = st.text_input("URL de YouTube *", placeholder="https://www.youtube.com/watch?v=XXXXX")
                 
-                # Mostrar preview del video si la URL es válida
                 if url_youtube and url_youtube.strip():
                     video_id = extraer_video_id(url_youtube)
                     if video_id:
                         st.video(f"https://www.youtube.com/embed/{video_id}")
                     else:
-                        st.warning("⚠️ URL no válida, usa el formato correcto")
+                        st.warning("⚠️ URL no válida")
                 
                 if st.form_submit_button("📤 Agregar Video"):
                     if titulo and url_youtube:
@@ -1755,9 +1764,9 @@ if st.session_state.get('es_admin', False):
         if not videos.empty:
             for _, v in videos.iterrows():
                 with st.expander(f"🎬 {v['titulo']}"):
-                    mostrar_video_youtube(v['video_url'])
+                    mostrar_video_youtube(v['video_url'], width_percent=25)
                     st.caption(f"📅 {v['fecha']}")
-                    st.caption(f"🔗 URL: {v['video_url']}")
+                    st.caption(f"🔗 {v['video_url']}")
                     
                     col1, col2 = st.columns(2)
                     with col1:
