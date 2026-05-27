@@ -120,7 +120,7 @@ def subir_audio_storage(file):
         if file is None:
             return None
         
-        nombre_archivo = f"musica/{uuid.uuid4()}.mp3"
+        nombre_archivo = f"audio_{uuid.uuid4()}.mp3"
         
         supabase.storage.from_("imagenes").upload(
             nombre_archivo,
@@ -188,6 +188,50 @@ def mostrar_musica(url_audio):
         st.markdown(html, unsafe_allow_html=True)
     else:
         st.warning("No hay URL de audio disponible")
+
+# ============================================
+# FUNCIONES DE TIKTOK
+# ============================================
+def extraer_tiktok_id(url_tiktok):
+    if not url_tiktok:
+        return None
+    
+    url_tiktok = url_tiktok.strip()
+    
+    patterns = [
+        r'tiktok\.com/(?:@[\w.-]+/video/|v/|embed/)(\d+)',
+        r'tiktok\.com/t/([\w-]+)',
+        r'vm\.tiktok\.com/([\w-]+)'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url_tiktok)
+        if match:
+            return match.group(1)
+    
+    return None
+
+def mostrar_tiktok(url_tiktok, width_percent=25):
+    tiktok_id = extraer_tiktok_id(url_tiktok)
+    
+    if tiktok_id:
+        html = f"""
+        <div style="width: {width_percent}%; margin: 0 auto;">
+            <blockquote 
+                class="tiktok-embed" 
+                cite="{url_tiktok}" 
+                data-video-id="{tiktok_id}"
+                style="max-width: 100%; width: 100%;">
+                <section>
+                    <a target="_blank" href="{url_tiktok}">Ver en TikTok</a>
+                </section>
+            </blockquote>
+            <script async src="https://www.tiktok.com/embed.js"></script>
+        </div>
+        """
+        st.markdown(html, unsafe_allow_html=True)
+    else:
+        st.markdown(f"📱 [Ver video en TikTok]({url_tiktok})")
 
 # ============================================
 # DETECTAR DISPOSITIVO MOVIL
@@ -595,6 +639,56 @@ def delete_video(id_):
         st.error(f"Error al eliminar video: {str(e)}")
         return False
 
+# --- TIKTOK ---
+def add_tiktok(titulo, url_tiktok):
+    try:
+        if not titulo or titulo.strip() == "":
+            st.error("❌ El título es obligatorio")
+            return False
+        
+        if not url_tiktok or url_tiktok.strip() == "":
+            st.error("❌ La URL de TikTok es obligatoria")
+            return False
+        
+        ahora = get_fecha_hora_venezuela()
+        
+        data = {
+            "titulo": titulo,
+            "tiktok_url": url_tiktok,
+            "fecha": ahora.strftime("%d/%m/%Y")
+        }
+        
+        result = supabase.table("tiktoks").insert(data).execute()
+        
+        if result.data:
+            st.success(f"✅ Video de TikTok agregado correctamente")
+            return True
+        else:
+            st.error("❌ Error al guardar en la base de datos")
+            return False
+            
+    except Exception as e:
+        st.error(f"❌ Error al agregar TikTok: {str(e)}")
+        return False
+
+def get_tiktoks():
+    try:
+        response = supabase.table("tiktoks").select("*").order("id", desc=True).execute()
+        if response.data:
+            return pd.DataFrame(response.data)
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error al obtener TikToks: {str(e)}")
+        return pd.DataFrame()
+
+def delete_tiktok(id_):
+    try:
+        supabase.table("tiktoks").delete().eq("id", id_).execute()
+        return True
+    except Exception as e:
+        st.error(f"Error al eliminar TikTok: {str(e)}")
+        return False
+
 # --- MUSICA ---
 def add_musica(titulo, audio_file):
     try:
@@ -621,14 +715,13 @@ def add_musica(titulo, audio_file):
         data = {
             "titulo": titulo,
             "audio_url": audio_url,
-            "formato": "mp3",
             "fecha": ahora.strftime("%d/%m/%Y")
         }
         
         result = supabase.table("musicas").insert(data).execute()
         
         if result.data:
-            st.success("✅ Música agregada correctamente")
+            st.success(f"✅ Música '{titulo}' agregada correctamente")
             return True
         else:
             st.error("❌ Error al guardar en la base de datos")
@@ -636,36 +729,6 @@ def add_musica(titulo, audio_file):
             
     except Exception as e:
         st.error(f"❌ Error al agregar música: {str(e)}")
-        return False
-
-def update_musica(id_, titulo, audio_file):
-    try:
-        if not titulo or titulo.strip() == "":
-            st.error("❌ El título es obligatorio")
-            return False
-        
-        audio_url = None
-        if audio_file:
-            if not audio_file.name.lower().endswith('.mp3'):
-                st.error("❌ Solo se permiten archivos MP3")
-                return False
-            audio_url = subir_audio_storage(audio_file)
-            if not audio_url:
-                st.error("❌ Error al subir el archivo de audio")
-                return False
-        else:
-            existing = supabase.table("musicas").select("audio_url").eq("id", id_).execute()
-            if existing.data:
-                audio_url = existing.data[0].get("audio_url")
-        
-        data = {
-            "titulo": titulo,
-            "audio_url": audio_url
-        }
-        supabase.table("musicas").update(data).eq("id", id_).execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al actualizar música: {str(e)}")
         return False
 
 def get_musicas():
@@ -878,68 +941,104 @@ if 'visitante_contado' not in st.session_state:
     st.session_state.visitante_contado = True
 
 # ============================================
-# ESTILOS
+# ESTILOS - CON PESTAÑAS VISIBLES (CORREGIDO)
 # ============================================
 st.markdown("""
 <style>
+/* Fondo tricolor venezolano */
 .stApp {
     background: linear-gradient(180deg, #FFD700 0%, #00247D 50%, #CF142B 100%);
 }
+
+/* Contenido principal con fondo oscuro */
 .block-container {
     background-color: rgba(0, 0, 0, 0.85) !important;
     border-radius: 20px !important;
     padding: 20px !important;
 }
+
+/* TODO EL TEXTO EN BLANCO */
 .main, .main p, .main span, .main div, .main label, .stMarkdown {
     color: #FFFFFF !important;
 }
+
+/* Títulos en dorado */
 .main h1, .main h2, .main h3, .main h4 {
     color: #FFD700 !important;
     font-weight: bold !important;
 }
+
+/* ============================================ */
+/* PESTAÑAS (TABS) - CORREGIDO - TEXTO SIEMPRE BLANCO */
+/* ============================================ */
+div[data-testid="stTabs"] {
+    background-color: transparent !important;
+}
+
 div[data-testid="stTabs"] button {
-    background-color: #2a2a2a !important;
+    background-color: #1a1a1a !important;
     border-radius: 12px !important;
     color: #FFFFFF !important;
     font-weight: bold !important;
     font-size: 16px !important;
-    padding: 10px 20px !important;
-    margin: 0 4px !important;
-    border: none !important;
+    padding: 12px 24px !important;
+    margin: 0 6px !important;
+    border: 2px solid #FFD700 !important;
+    cursor: pointer !important;
+    transition: all 0.3s ease !important;
 }
+
 div[data-testid="stTabs"] button:hover {
-    background-color: #3a3a3a !important;
-    color: #FFD700 !important;
+    background-color: #FFD700 !important;
+    color: #000000 !important;
+    border-color: #FFFFFF !important;
 }
+
 div[data-testid="stTabs"] button[aria-selected="true"] {
     background: linear-gradient(135deg, #FFD700, #CF142B) !important;
     color: #FFFFFF !important;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.3) !important;
+    border-color: #FFFFFF !important;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.5) !important;
 }
+
+div[data-testid="stTabs"] button p {
+    color: inherit !important;
+    font-weight: bold !important;
+}
+
+/* Expanders */
 .streamlit-expanderHeader {
     background-color: #1a1a1a !important;
     border-radius: 10px !important;
     border-left: 4px solid #FFD700 !important;
     color: #FFD700 !important;
 }
+
 .streamlit-expanderContent {
     background-color: #1a1a1a !important;
     border-radius: 10px !important;
     padding: 15px !important;
 }
+
+/* Sidebar azul claro */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #87CEEB 0%, #4682B4 100%) !important;
     border-right: 3px solid #FFD700 !important;
 }
+
 [data-testid="stSidebar"] * {
     color: #1a1a2e !important;
 }
+
+/* Inputs */
 input, textarea, .stSelectbox > div > div {
     background-color: #f0f0f0 !important;
     color: #000000 !important;
     border-radius: 12px !important;
     border: 2px solid #FFD700 !important;
 }
+
+/* Botones */
 .stButton > button {
     background: linear-gradient(135deg, #FFD700, #CF142B) !important;
     color: white !important;
@@ -947,6 +1046,8 @@ input, textarea, .stSelectbox > div > div {
     font-weight: bold !important;
     border-radius: 25px !important;
 }
+
+/* Footer */
 .bronze-footer {
     background: linear-gradient(145deg, #8c6a31, #5d431a) !important;
     border: 5px solid #d4af37 !important;
@@ -955,13 +1056,18 @@ input, textarea, .stSelectbox > div > div {
     text-align: center !important;
     margin-top: 50px !important;
 }
+
 .bronze-footer p {
     color: #ffd700 !important;
 }
+
+/* Mensajes de información */
 .stInfo, .stSuccess, .stWarning, .stError {
     background-color: rgba(0,0,0,0.8) !important;
     color: white !important;
 }
+
+/* Reproductor de audio */
 audio {
     width: 100%;
     border-radius: 30px;
@@ -1054,8 +1160,8 @@ with st.sidebar:
         st.markdown("### 📋 Panel de Control")
         admin_opt = st.radio("Seleccionar módulo:", [
             "📰 Noticias", "🏪 Negocios", "💭 Reflexiones", "📜 Crónicas",
-            "🎬 Videos", "🎵 Música", "⚠️ Denuncias", "💬 Opiniones", 
-            "👥 Personajes", "⚙️ Configuración"
+            "🎬 Videos", "📱 TikTok", "🎵 Música", "⚠️ Denuncias", 
+            "💬 Opiniones", "👥 Personajes", "⚙️ Configuración"
         ])
         st.session_state.admin_opt = admin_opt
         st.session_state.es_admin = True
@@ -1263,10 +1369,11 @@ with menu_tabs[4]:
 # --- TAB 5: MULTIMEDIA ---
 with menu_tabs[5]:
     st.title("🎬 Multimedia")
-    tab_vid, tab_mus, tab_rad = st.tabs(["🎥 Videos", "🎵 Música", "📻 Radio"])
+    tab_vid, tab_tik, tab_mus, tab_rad = st.tabs(["🎥 YouTube", "📱 TikTok", "🎵 Música", "📻 Radio"])
     
+    # YouTube
     with tab_vid:
-        st.markdown("### 🎥 Videos al 25% de tamaño")
+        st.markdown("### 🎥 Videos de YouTube al 25% de tamaño")
         videos = get_videos()
         if not videos.empty:
             for _, v in videos.iterrows():
@@ -1276,13 +1383,41 @@ with menu_tabs[5]:
         else:
             st.info("No hay videos disponibles")
     
+    # TikTok
+    with tab_tik:
+        st.markdown("### 📱 Videos de TikTok al 25% de tamaño")
+        st.info("💡 Pega la URL del video de TikTok")
+        
+        tiktoks = get_tiktoks()
+        if not tiktoks.empty:
+            for _, t in tiktoks.iterrows():
+                with st.expander(f"📱 {t['titulo']}"):
+                    mostrar_tiktok(t['tiktok_url'], width_percent=25)
+                    st.caption(f"📅 {t['fecha']}")
+        else:
+            st.info("No hay videos de TikTok disponibles")
+        
+        if st.session_state.get('es_admin', False):
+            st.markdown("---")
+            st.markdown("#### ➕ Agregar nuevo TikTok")
+            with st.form("add_tiktok_form"):
+                titulo_tik = st.text_input("Título del video")
+                url_tik = st.text_input("URL de TikTok", placeholder="https://www.tiktok.com/@usuario/video/123456789")
+                if st.form_submit_button("📤 Agregar TikTok"):
+                    if titulo_tik and url_tik:
+                        if add_tiktok(titulo_tik, url_tik):
+                            st.rerun()
+                    else:
+                        st.error("❌ Título y URL son obligatorios")
+    
+    # Música
     with tab_mus:
         st.markdown("### 🎵 Lista de Música")
         musicas = get_musicas()
         if not musicas.empty:
             for _, m in musicas.iterrows():
                 with st.expander(f"🎵 {m['titulo']}"):
-                    if m.get('audio_url'):
+                    if m.get('audio_url') and m['audio_url']:
                         mostrar_musica(m['audio_url'])
                         st.caption(f"📅 {m['fecha']}")
                     else:
@@ -1290,19 +1425,34 @@ with menu_tabs[5]:
         else:
             st.info("No hay música disponible")
     
+    # Radio
     with tab_rad:
-        st.markdown("### 📻 Love Songs Radio")
-        radio_iframe = """
-        <iframe src="https://hearme.fm/embed/love-songs" 
+        st.markdown("### 📻 Radio Online")
+        
+        radio_opcion = st.selectbox(
+            "Selecciona una emisora:",
+            ["Love Songs Radio", "Radio Romántica"]
+        )
+        
+        if radio_opcion == "Love Songs Radio":
+            st.markdown("#### 🎵 Love Songs Radio")
+            radio_iframe = """
+            <iframe 
+                src="https://hearme.fm/embed/love-songs" 
                 width="100%" 
                 height="200" 
                 frameborder="0" 
                 allowtransparency 
                 allow="autoplay">
-        </iframe>
-        """
-        st.markdown(radio_iframe, unsafe_allow_html=True)
-        st.caption("🎶 Música romántica las 24 horas")
+            </iframe>
+            """
+            st.markdown(radio_iframe, unsafe_allow_html=True)
+            st.caption("🎶 Música romántica las 24 horas")
+        
+        elif radio_opcion == "Radio Romántica":
+            st.markdown("#### 🎵 Radio Romántica")
+            st.audio("https://streamingecuador.com:8000/romantica.mp3", format="audio/mp3")
+            st.caption("🎶 Los mejores éxitos románticos")
 
 # --- TAB 6: DENUNCIAS ---
 with menu_tabs[6]:
@@ -1815,6 +1965,46 @@ if st.session_state.get('es_admin', False):
                         del st.session_state.edit_video
                         st.rerun()
     
+    # --- TIKTOK ---
+    elif "📱 TikTok" in admin_opt:
+        st.subheader("📱 Gestionar Videos de TikTok")
+        
+        with st.expander("➕ CREAR nuevo TikTok", expanded=True):
+            with st.form("ftik"):
+                titulo = st.text_input("Título del video *")
+                url_tiktok = st.text_input("URL de TikTok *", placeholder="https://www.tiktok.com/@usuario/video/123456789")
+                
+                if st.form_submit_button("📤 Agregar TikTok"):
+                    if titulo and url_tiktok:
+                        if add_tiktok(titulo, url_tiktok):
+                            st.rerun()
+                    else:
+                        st.error("❌ Título y URL son obligatorios")
+        
+        st.markdown("---")
+        st.markdown("### 📋 TikToks existentes")
+        
+        tiktoks = get_tiktoks()
+        if not tiktoks.empty:
+            for _, t in tiktoks.iterrows():
+                with st.expander(f"📱 {t['titulo']}"):
+                    mostrar_tiktok(t['tiktok_url'], width_percent=25)
+                    st.caption(f"📅 {t['fecha']}")
+                    st.caption(f"🔗 {t['tiktok_url']}")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button(f"✏️ MODIFICAR", key=f"edit_tik_{t['id']}"):
+                            st.session_state.edit_tiktok = t.to_dict()
+                            st.rerun()
+                    with col2:
+                        if st.button(f"🗑️ ELIMINAR", key=f"del_tik_{t['id']}"):
+                            if delete_tiktok(t['id']):
+                                st.success("✅ TikTok eliminado")
+                                st.rerun()
+        else:
+            st.info("No hay TikToks registrados")
+    
     # --- MUSICA ---
     elif "🎵 Música" in admin_opt:
         st.subheader("🎵 Gestionar Música")
@@ -1841,7 +2031,7 @@ if st.session_state.get('es_admin', False):
         if not musicas.empty:
             for _, m in musicas.iterrows():
                 with st.expander(f"🎵 {m['titulo']}"):
-                    if m.get('audio_url'):
+                    if m.get('audio_url') and m['audio_url']:
                         mostrar_musica(m['audio_url'])
                         st.caption(f"📅 {m['fecha']}")
                     else:
