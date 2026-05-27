@@ -9,6 +9,8 @@ import tempfile
 import os
 import uuid
 import re
+import hashlib
+import time
 
 # ============================================
 # CONFIGURACION DE SUPABASE
@@ -43,6 +45,47 @@ def actualizar_dolar_manual(nuevo_valor):
         return True
     except Exception:
         return False
+
+# ============================================
+# FUNCIONES DE ME GUSTA
+# ============================================
+def agregar_like(usuario_id, usuario_nombre, usuario_telefono):
+    try:
+        existing = supabase.table("likes").select("*").eq("usuario_id", usuario_id).execute()
+        
+        if existing.data:
+            supabase.table("likes").update({
+                "activo": True,
+                "fecha": datetime.now(pytz.UTC).isoformat()
+            }).eq("usuario_id", usuario_id).execute()
+            return True
+        else:
+            data = {
+                "usuario_id": usuario_id,
+                "usuario_nombre": usuario_nombre if usuario_nombre else "Anónimo",
+                "usuario_telefono": usuario_telefono if usuario_telefono else None,
+                "fecha": datetime.now(pytz.UTC).isoformat(),
+                "activo": True
+            }
+            supabase.table("likes").insert(data).execute()
+            return True
+    except Exception as e:
+        st.error(f"Error al agregar like: {str(e)}")
+        return False
+
+def obtener_total_likes():
+    try:
+        response = supabase.table("likes").select("*", count="exact").eq("activo", True).execute()
+        return response.count if response.count else 0
+    except Exception:
+        return 0
+
+def obtener_lista_likes():
+    try:
+        response = supabase.table("likes").select("*").eq("activo", True).order("fecha", desc=True).execute()
+        return pd.DataFrame(response.data) if response.data else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
 # ============================================
 # FUNCIÓN DE OPTIMIZACIÓN DE IMÁGENES
@@ -941,7 +984,7 @@ if 'visitante_contado' not in st.session_state:
     st.session_state.visitante_contado = True
 
 # ============================================
-# ESTILOS - CON PESTAÑAS VISIBLES (CORREGIDO)
+# ESTILOS - TODAS LAS LETRAS EN BLANCO NEGRITA
 # ============================================
 st.markdown("""
 <style>
@@ -957,20 +1000,31 @@ st.markdown("""
     padding: 20px !important;
 }
 
-/* TODO EL TEXTO EN BLANCO */
-.main, .main p, .main span, .main div, .main label, .stMarkdown {
+/* TODAS LAS LETRAS EN BLANCO NEGRITA */
+* {
     color: #FFFFFF !important;
+    font-weight: bold !important;
 }
 
-/* Títulos en dorado */
+.main, .main p, .main span, .main div, .main label, .stMarkdown {
+    color: #FFFFFF !important;
+    font-weight: bold !important;
+}
+
+/* Títulos en dorado (ligeramente más claro) */
 .main h1, .main h2, .main h3, .main h4 {
     color: #FFD700 !important;
     font-weight: bold !important;
 }
 
-/* ============================================ */
-/* PESTAÑAS (TABS) - CORREGIDO - TEXTO SIEMPRE BLANCO */
-/* ============================================ */
+/* Enlaces */
+a {
+    color: #FFD700 !important;
+    font-weight: bold !important;
+    text-decoration: underline !important;
+}
+
+/* Pestañas (TABS) */
 div[data-testid="stTabs"] {
     background-color: transparent !important;
 }
@@ -994,13 +1048,6 @@ div[data-testid="stTabs"] button:hover {
     border-color: #FFFFFF !important;
 }
 
-div[data-testid="stTabs"] button[aria-selected="true"] {
-    background: linear-gradient(135deg, #FFD700, #CF142B) !important;
-    color: #FFFFFF !important;
-    border-color: #FFFFFF !important;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.5) !important;
-}
-
 div[data-testid="stTabs"] button p {
     color: inherit !important;
     font-weight: bold !important;
@@ -1012,6 +1059,7 @@ div[data-testid="stTabs"] button p {
     border-radius: 10px !important;
     border-left: 4px solid #FFD700 !important;
     color: #FFD700 !important;
+    font-weight: bold !important;
 }
 
 .streamlit-expanderContent {
@@ -1020,7 +1068,7 @@ div[data-testid="stTabs"] button p {
     padding: 15px !important;
 }
 
-/* Sidebar azul claro */
+/* Sidebar */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #87CEEB 0%, #4682B4 100%) !important;
     border-right: 3px solid #FFD700 !important;
@@ -1028,14 +1076,21 @@ div[data-testid="stTabs"] button p {
 
 [data-testid="stSidebar"] * {
     color: #1a1a2e !important;
+    font-weight: bold !important;
 }
 
 /* Inputs */
 input, textarea, .stSelectbox > div > div {
     background-color: #f0f0f0 !important;
     color: #000000 !important;
+    font-weight: normal !important;
     border-radius: 12px !important;
     border: 2px solid #FFD700 !important;
+}
+
+input::placeholder, textarea::placeholder {
+    color: #666666 !important;
+    font-weight: normal !important;
 }
 
 /* Botones */
@@ -1059,18 +1114,32 @@ input, textarea, .stSelectbox > div > div {
 
 .bronze-footer p {
     color: #ffd700 !important;
+    font-weight: bold !important;
 }
 
-/* Mensajes de información */
+/* Mensajes */
 .stInfo, .stSuccess, .stWarning, .stError {
     background-color: rgba(0,0,0,0.8) !important;
     color: white !important;
+    font-weight: bold !important;
 }
 
 /* Reproductor de audio */
 audio {
     width: 100%;
     border-radius: 30px;
+}
+
+/* Métricas */
+[data-testid="stMetricValue"] {
+    color: #FFD700 !important;
+    font-weight: bold !important;
+    font-size: 2rem !important;
+}
+
+[data-testid="stMetricLabel"] {
+    color: #FFFFFF !important;
+    font-weight: bold !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -1126,12 +1195,12 @@ st.markdown(f"""
                 border-radius: 20px;
                 padding: 60px 20px 40px 20px;
                 border: 3px solid #FFD700;">
-        <h1 style="color: #FFD700; text-shadow: 3px 3px 8px black; font-size: 2.5em;">Santa Teresa al Dia</h1>
-        <p style="color: #FFFFFF; text-shadow: 2px 2px 5px black; font-size: 1.3em;">Informacion, Cultura y Fe de nuestro pueblo</p>
+        <h1 style="color: #FFD700; text-shadow: 3px 3px 8px black; font-size: 2.5em; font-weight: bold;">Santa Teresa al Dia</h1>
+        <p style="color: #FFFFFF; text-shadow: 2px 2px 5px black; font-size: 1.3em; font-weight: bold;">Informacion, Cultura y Fe de nuestro pueblo</p>
         <div style="margin-top: 25px; padding-top: 10px; border-top: 1px solid rgba(255, 215, 0, 0.5);">
-            <p style="color: #FFD700; font-size: 0.9em; margin: 0;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</p>
-            <p style="color: white; font-size: 1em; margin: 5px 0;">{ahora.strftime("%I:%M %p")}</p>
-            <p style="color: #FFD700; font-size: 0.9em; margin: 0;">👥 Visitantes: {visitas:,} | 💵 Dólar BCV: {dolar:.2f} Bs</p>
+            <p style="color: #FFD700; font-size: 0.9em; margin: 0; font-weight: bold;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</p>
+            <p style="color: white; font-size: 1em; margin: 5px 0; font-weight: bold;">{ahora.strftime("%I:%M %p")}</p>
+            <p style="color: #FFD700; font-size: 0.9em; margin: 0; font-weight: bold;">👥 Visitantes: {visitas:,} | 💵 Dólar BCV: {dolar:.2f} Bs</p>
         </div>
     </div>
 </div>
@@ -1188,6 +1257,50 @@ menu_tabs = st.tabs(["🏠 Portada", "📰 Noticias", "📍 Donde ir - Donde com
 # --- TAB 0: PORTADA ---
 with menu_tabs[0]:
     st.title("Santa Teresa al Dia")
+    
+    # Generar ID único para el usuario
+    if 'usuario_id' not in st.session_state:
+        session_id = str(time.time()) + str(st.session_state.get('admin_pass', ''))
+        st.session_state.usuario_id = hashlib.md5(session_id.encode()).hexdigest()
+    
+    # Mostrar total de Me gusta
+    total_likes = obtener_total_likes()
+    
+    # Botón de Me gusta
+    col_like1, col_like2, col_like3 = st.columns([1, 2, 1])
+    with col_like2:
+        st.markdown("---")
+        st.markdown("### 👍 Apoya nuestra página")
+        
+        with st.form("form_like"):
+            nombre_like = st.text_input("Tu nombre (para aparecer en la lista)", placeholder="Ej: María González")
+            telefono_like = st.text_input("WhatsApp (opcional)", placeholder="0412 1234567")
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.form_submit_button("👍 Me gusta", use_container_width=True):
+                    if agregar_like(st.session_state.usuario_id, nombre_like if nombre_like else "Anónimo", telefono_like):
+                        st.success(f"✅ Gracias por tu like! Total: {total_likes + 1}")
+                        st.balloons()
+                        st.rerun()
+        
+        # Mostrar total
+        st.markdown(f"### ❤️ Total de Me gusta: **{total_likes}**")
+        
+        # Mostrar últimos likes
+        with st.expander("👥 Ver últimos Me gusta"):
+            likes_df = obtener_lista_likes()
+            if not likes_df.empty:
+                for _, l in likes_df.head(10).iterrows():
+                    try:
+                        fecha_like = datetime.fromisoformat(l['fecha']).strftime("%d/%m/%Y %H:%M")
+                    except:
+                        fecha_like = l['fecha'][:16] if len(l['fecha']) > 16 else l['fecha']
+                    st.markdown(f"👍 **{l['usuario_nombre']}** - {fecha_like}")
+            else:
+                st.info("Sé el primero en dar Me gusta")
+        
+        st.markdown("---")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -1371,7 +1484,6 @@ with menu_tabs[5]:
     st.title("🎬 Multimedia")
     tab_vid, tab_tik, tab_mus, tab_rad = st.tabs(["🎥 YouTube", "📱 TikTok", "🎵 Música", "📻 Radio"])
     
-    # YouTube
     with tab_vid:
         st.markdown("### 🎥 Videos de YouTube al 25% de tamaño")
         videos = get_videos()
@@ -1383,11 +1495,8 @@ with menu_tabs[5]:
         else:
             st.info("No hay videos disponibles")
     
-    # TikTok
     with tab_tik:
         st.markdown("### 📱 Videos de TikTok al 25% de tamaño")
-        st.info("💡 Pega la URL del video de TikTok")
-        
         tiktoks = get_tiktoks()
         if not tiktoks.empty:
             for _, t in tiktoks.iterrows():
@@ -1397,7 +1506,7 @@ with menu_tabs[5]:
         else:
             st.info("No hay videos de TikTok disponibles")
         
-        if st.session_state.get('es_admin', False):
+        if es_admin:
             st.markdown("---")
             st.markdown("#### ➕ Agregar nuevo TikTok")
             with st.form("add_tiktok_form"):
@@ -1410,7 +1519,6 @@ with menu_tabs[5]:
                     else:
                         st.error("❌ Título y URL son obligatorios")
     
-    # Música
     with tab_mus:
         st.markdown("### 🎵 Lista de Música")
         musicas = get_musicas()
@@ -1425,34 +1533,19 @@ with menu_tabs[5]:
         else:
             st.info("No hay música disponible")
     
-    # Radio
     with tab_rad:
-        st.markdown("### 📻 Radio Online")
-        
-        radio_opcion = st.selectbox(
-            "Selecciona una emisora:",
-            ["Love Songs Radio", "Radio Romántica"]
-        )
-        
-        if radio_opcion == "Love Songs Radio":
-            st.markdown("#### 🎵 Love Songs Radio")
-            radio_iframe = """
-            <iframe 
-                src="https://hearme.fm/embed/love-songs" 
+        st.markdown("### 📻 Love Songs Radio")
+        radio_iframe = """
+        <iframe src="https://hearme.fm/embed/love-songs" 
                 width="100%" 
                 height="200" 
                 frameborder="0" 
                 allowtransparency 
                 allow="autoplay">
-            </iframe>
-            """
-            st.markdown(radio_iframe, unsafe_allow_html=True)
-            st.caption("🎶 Música romántica las 24 horas")
-        
-        elif radio_opcion == "Radio Romántica":
-            st.markdown("#### 🎵 Radio Romántica")
-            st.audio("https://streamingecuador.com:8000/romantica.mp3", format="audio/mp3")
-            st.caption("🎶 Los mejores éxitos románticos")
+        </iframe>
+        """
+        st.markdown(radio_iframe, unsafe_allow_html=True)
+        st.caption("🎶 Música romántica las 24 horas")
 
 # --- TAB 6: DENUNCIAS ---
 with menu_tabs[6]:
@@ -1990,7 +2083,6 @@ if st.session_state.get('es_admin', False):
                 with st.expander(f"📱 {t['titulo']}"):
                     mostrar_tiktok(t['tiktok_url'], width_percent=25)
                     st.caption(f"📅 {t['fecha']}")
-                    st.caption(f"🔗 {t['tiktok_url']}")
                     
                     col1, col2 = st.columns(2)
                     with col1:
@@ -2254,9 +2346,9 @@ st.markdown("""
         <div style="position: absolute; bottom: 15px; left: 15px; width: 22px; height: 22px; background: radial-gradient(circle at 30% 30%, #bbb, #444); border-radius: 50%; box-shadow: 2px 2px 6px rgba(0,0,0,0.6); border: 1px solid #d4af37;"></div>
         <div style="position: absolute; bottom: 15px; right: 15px; width: 22px; height: 22px; background: radial-gradient(circle at 30% 30%, #bbb, #444); border-radius: 50%; box-shadow: 2px 2px 6px rgba(0,0,0,0.6); border: 1px solid #d4af37;"></div>
         <p style="font-size: 1.8em; letter-spacing: 4px; color: #ffd700; font-family: 'Times New Roman', serif; font-weight: bold;">DESARROLLADO POR WILLIAN ALMENAR</p>
-        <p style="color: #ffd700; font-family: 'Times New Roman', serif;">Prohibida la reproducción total o parcial</p>
-        <p style="color: #ffd700; font-family: 'Times New Roman', serif;">DERECHOS RESERVADOS</p>
-        <p style="color: #ffd700; font-family: 'Times New Roman', serif;">Santa Teresa del Tuy, 2026</p>
+        <p style="color: #ffd700; font-family: 'Times New Roman', serif; font-weight: bold;">Prohibida la reproducción total o parcial</p>
+        <p style="color: #ffd700; font-family: 'Times New Roman', serif; font-weight: bold;">DERECHOS RESERVADOS</p>
+        <p style="color: #ffd700; font-family: 'Times New Roman', serif; font-weight: bold;">Santa Teresa del Tuy, 2026</p>
     </div>
 </div>
 """, unsafe_allow_html=True)
