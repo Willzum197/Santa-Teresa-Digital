@@ -83,61 +83,6 @@ def ya_dio_like(usuario_id):
         return False
 
 # ============================================
-# FUNCIONES PARA EL CRIMEN NO PAGA
-# ============================================
-def add_crimen(titulo, descripcion, imagenes):
-    try:
-        ahora = get_fecha_hora_venezuela()
-        imagenes_urls = subir_multiples_imagenes(imagenes, "crimen") if imagenes else []
-        data = {
-            "titulo": titulo,
-            "descripcion": descripcion,
-            "imagenes_url": imagenes_urls,
-            "fecha": ahora.strftime("%d/%m/%Y")
-        }
-        result = supabase.table("crimen_no_paga").insert(data).execute()
-        return True if result.data else False
-    except Exception as e:
-        st.error(f"Error al agregar: {str(e)}")
-        return False
-
-def update_crimen(id_, titulo, descripcion, imagenes):
-    try:
-        imagenes_urls = None
-        if imagenes:
-            imagenes_urls = subir_multiples_imagenes(imagenes, "crimen")
-        else:
-            existing = supabase.table("crimen_no_paga").select("imagenes_url").eq("id", id_).execute()
-            if existing.data:
-                imagenes_urls = existing.data[0].get("imagenes_url")
-        
-        data = {
-            "titulo": titulo,
-            "descripcion": descripcion,
-            "imagenes_url": imagenes_urls if imagenes_urls else []
-        }
-        supabase.table("crimen_no_paga").update(data).eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
-def get_crimenes():
-    try:
-        response = supabase.table("crimen_no_paga").select("*").order("id", desc=True).execute()
-        if response.data:
-            return pd.DataFrame(response.data)
-        return pd.DataFrame()
-    except Exception:
-        return pd.DataFrame()
-
-def delete_crimen(id_):
-    try:
-        supabase.table("crimen_no_paga").delete().eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
-# ============================================
 # FUNCIÓN DE OPTIMIZACIÓN DE IMÁGENES
 # ============================================
 def optimizar_imagen(file, max_width=1024, quality=75):
@@ -1349,6 +1294,16 @@ with menu_tabs[0]:
                     st.write(n['contenido'])
         else:
             st.info("No hay noticias disponibles")
+        
+        st.markdown("### 📽️ Últimos Reportajes")
+        reportajes = get_noticias(categoria="Reportajes")
+        if not reportajes.empty:
+            for _, r in reportajes.head(3).iterrows():
+                with st.expander(f"📽️ {r['titulo']} - {r['fecha']}"):
+                    mostrar_imagen_segura(r.get('imagen_url'), 300)
+                    st.write(r['contenido'])
+        else:
+            st.info("No hay reportajes disponibles")
     
     with col2:
         st.markdown("### ✝️ Reflexión del Día")
@@ -1364,7 +1319,7 @@ with menu_tabs[0]:
 # --- TAB 1: NOTICIAS ---
 with menu_tabs[1]:
     st.title("📰 Noticias")
-    tab_nac, tab_inter, tab_dep, tab_suc, tab_far = st.tabs(["🇻🇪 Nacionales", "🌎 Internacionales", "⚽ Deportes", "🚨 Sucesos", "🎭 Farándula"])
+    tab_nac, tab_inter, tab_dep, tab_suc, tab_far, tab_rep = st.tabs(["🇻🇪 Nacionales", "🌎 Internacionales", "⚽ Deportes", "🚨 Sucesos", "🎭 Farándula", "📽️ Reportajes"])
     
     with tab_nac:
         noticias_nac = get_noticias(categoria="Nacional")
@@ -1415,6 +1370,16 @@ with menu_tabs[1]:
                     st.write(n['contenido'])
         else:
             st.info("No hay noticias de Farándula")
+    
+    with tab_rep:
+        noticias_rep = get_noticias(categoria="Reportajes")
+        if not noticias_rep.empty:
+            for _, n in noticias_rep.iterrows():
+                with st.expander(f"📽️ {n['titulo']} - {n['fecha']}"):
+                    mostrar_imagen_segura(n.get('imagen_url'), 300)
+                    st.write(n['contenido'])
+        else:
+            st.info("No hay Reportajes disponibles")
 
 # --- TAB 2: NEGOCIOS ---
 with menu_tabs[2]:
@@ -2465,7 +2430,6 @@ if st.session_state.get('es_admin', False):
     elif "⚙️ Configuración" in admin_opt:
         st.subheader("⚙️ Configuración del Sistema")
         
-        # Mostrar estadísticas de Me gusta (SOLO ADMIN)
         st.markdown("### ❤️ Estadísticas de Me gusta")
         col_est1, col_est2, col_est3 = st.columns(3)
         
