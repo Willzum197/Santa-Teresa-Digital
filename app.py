@@ -1151,19 +1151,30 @@ a {
     font-weight: bold !important;
     text-decoration: underline !important;
 }
+div[data-testid="stTabs"] {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+}
 div[data-testid="stTabs"] button {
     background-color: #1a1a1a !important;
     border-radius: 12px !important;
     color: #FFFFFF !important;
     font-weight: bold !important;
-    font-size: 14px !important;
-    padding: 8px 16px !important;
-    margin: 0 4px !important;
+    font-size: 13px !important;
+    padding: 8px 14px !important;
+    margin: 0 !important;
     border: 1px solid #FFD700 !important;
+    white-space: nowrap !important;
 }
 div[data-testid="stTabs"] button:hover {
     background-color: #FFD700 !important;
     color: #000000 !important;
+}
+div[data-testid="stTabs"] button[aria-selected="true"] {
+    background: linear-gradient(135deg, #FFD700, #CF142B) !important;
+    color: #FFFFFF !important;
 }
 .streamlit-expanderHeader {
     background-color: #1a1a1a !important;
@@ -1264,67 +1275,36 @@ document.getElementById('copyButton').addEventListener('click', function() {{
 st.markdown("---")
 
 # ============================================
-# ENCABEZADO PRINCIPAL - CORREGIDO (SIN FONDO BLANCO)
+# ENCABEZADO PRINCIPAL
 # ============================================
 ahora = get_fecha_hora_venezuela()
 dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 visitas = get_visitas()
 dolar = get_dolar()
-total_likes = obtener_total_likes()
+portada_url = get_portada_url()
+
 hora_str = ahora.strftime("%I:%M %p").lstrip("0")
 
-# Encabezado sin imagen de fondo (solo color para evitar fondo blanco)
 st.markdown(f"""
-<div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 20px; padding: 20px 25px; border: 2px solid #FFD700; margin-bottom: 20px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-        <!-- Columna 1: Título y subtítulo -->
-        <div style="flex: 2; min-width: 200px;">
-            <div style="font-size: 2.2em; font-weight: bold; color: #FFD700;">Santa Teresa al Dia</div>
-            <div style="font-size: 1em; color: #FFFFFF;">Informacion, Cultura y Fe de nuestro pueblo</div>
-        </div>
-        
-        <!-- Columna 2: Me gusta -->
-        <div style="flex: 1; min-width: 180px; text-align: center; background: rgba(0,0,0,0.4); border-radius: 15px; padding: 10px;">
-            <div style="font-size: 0.85em; color: #FFD700;">❤️ Apoya nuestra página</div>
-            <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-                <span style="font-size: 1.8em;">👍</span>
-                <span style="font-size: 1.5em; font-weight: bold; color: #FFD700;">{total_likes:,}</span>
-                <span style="font-size: 0.7em;">Personas apoyan</span>
-            </div>
-        </div>
-        
-        <!-- Columna 3: Fecha, hora y visitantes -->
-        <div style="flex: 1.5; min-width: 220px; text-align: right;">
-            <div style="font-size: 0.85em; color: #FFD700;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</div>
-            <div style="font-size: 1em; color: #FFFFFF;">🕐 {hora_str}</div>
-            <div style="font-size: 0.85em; color: #FFD700;">👥 Visitantes: {visitas:,} | 💵 Dólar BCV: {dolar:.2f} Bs</div>
+<div style="text-align: center; margin-bottom: 20px;">
+    <div style="background: linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55)), 
+                url('{portada_url}');
+                background-size: cover;
+                background-position: center;
+                border-radius: 20px;
+                padding: 40px 20px 30px 20px;
+                border: 3px solid #FFD700;">
+        <h1 style="color: #FFD700; text-shadow: 3px 3px 8px black; font-size: 2em; font-weight: bold;">Santa Teresa al Dia</h1>
+        <p style="color: #FFFFFF; text-shadow: 2px 2px 5px black; font-size: 1.1em; font-weight: bold;">Informacion, Cultura y Fe de nuestro pueblo</p>
+        <div style="margin-top: 20px; padding-top: 8px; border-top: 1px solid rgba(255, 215, 0, 0.5);">
+            <p style="color: #FFD700; font-size: 0.8em; margin: 0; font-weight: bold;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</p>
+            <p style="color: white; font-size: 1em; margin: 5px 0; font-weight: bold;">🕐 {hora_str}</p>
+            <p style="color: #FFD700; font-size: 0.8em; margin: 0; font-weight: bold;">👥 Visitantes: {visitas:,} | 💵 Dólar BCV: {dolar:.2f} Bs</p>
         </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
-
-# Botón "Dar Me gusta" separado debajo del encabezado
-if 'usuario_id' not in st.session_state:
-    session_id = str(time.time()) + str(st.session_state.get('admin_pass', ''))
-    st.session_state.usuario_id = hashlib.md5(session_id.encode()).hexdigest()
-
-ya_like = ya_dio_like(st.session_state.usuario_id)
-
-if not ya_like:
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-    with col_btn2:
-        if st.button("👍 Dar Me gusta", use_container_width=True, key="btn_like_global"):
-            if agregar_like(st.session_state.usuario_id):
-                st.success("✅ Gracias por tu like!")
-                st.balloons()
-                st.rerun()
-            else:
-                st.error("❌ Error al registrar like")
-else:
-    st.info("❤️ ¡Gracias por apoyar nuestra página!")
-
-st.markdown("---")
 
 # ============================================
 # SIDEBAR ADMIN
@@ -1357,7 +1337,8 @@ with st.sidebar:
         
         st.markdown("---")
         st.markdown("### 📊 Estadísticas")
-        st.metric("👍 Me gusta", f"{total_likes:,}")
+        total_likes_sidebar = obtener_total_likes()
+        st.metric("👍 Me gusta", f"{total_likes_sidebar:,}")
     else:
         st.session_state.es_admin = False
 
@@ -1410,7 +1391,7 @@ with col_linea3[2]:
     if st.button("📅 Efemérides Médicas", use_container_width=True):
         st.session_state.selected_tab = 10
 with col_linea3[3]:
-    st.markdown(" ")
+    st.markdown(" ")  # Espacio vacío para equilibrio
 
 st.markdown("---")
 
@@ -1421,6 +1402,67 @@ if 'selected_tab' not in st.session_state:
 # Mostrar contenido según la pestaña seleccionada
 if st.session_state.selected_tab == 0:
     # --- PORTADA ---
+    # Título más pequeño
+    st.markdown("""
+    <div style="text-align: center; margin-bottom: 20px;">
+        <h2 style="color: #FFD700; font-weight: bold; font-size: 1.8em;">Santa Teresa al Dia</h2>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if 'usuario_id' not in st.session_state:
+        session_id = str(time.time()) + str(st.session_state.get('admin_pass', ''))
+        st.session_state.usuario_id = hashlib.md5(session_id.encode()).hexdigest()
+    
+    ya_like = ya_dio_like(st.session_state.usuario_id)
+    total_likes = obtener_total_likes()
+    
+    st.markdown("""
+    <div style="text-align: center; margin: 10px 0;">
+        <h3 style="color: #FFD700; font-size: 1.2em; margin-bottom: 10px;">❤️ Apoya nuestra página</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_like1, col_like2, col_like3 = st.columns([1, 2, 1])
+    
+    with col_like2:
+        col_icon, col_number, col_text = st.columns([1, 1, 2])
+        
+        with col_icon:
+            st.markdown("""
+            <div style="text-align: center;">
+                <div style="font-size: 28px; color: #FFD700;">👍</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_number:
+            st.markdown(f"""
+            <div style="text-align: center;">
+                <div style="font-size: 24px; font-weight: bold; color: #FFD700;">{total_likes:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_text:
+            st.markdown("""
+            <div style="text-align: left;">
+                <div style="font-size: 12px;">Personas apoyan esta página</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True)
+        
+        if not ya_like:
+            if st.button("👍 Dar Me gusta", use_container_width=True, key="btn_like_portada"):
+                if agregar_like(st.session_state.usuario_id):
+                    st.success("✅ Gracias por tu like!")
+                    st.balloons()
+                    st.rerun()
+                else:
+                    st.error("❌ Error al registrar like")
+        else:
+            st.info("❤️ ¡Gracias por apoyar nuestra página!")
+    
+    st.markdown("---")
+    
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("### 📰 Últimas Noticias")
