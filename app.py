@@ -47,14 +47,43 @@ def actualizar_dolar_manual(nuevo_valor):
         return False
 
 # ============================================
+# FUNCIÓN PARA OBTENER ID DE USUARIO PERMANENTE
+# ============================================
+def obtener_usuario_id_permanente():
+    """Genera ID único basado en IP y User-Agent (no cambia si el usuario vuelve)"""
+    try:
+        # Obtener headers
+        headers = st.context.headers
+        user_agent = headers.get('User-Agent', '')
+        ip = headers.get('X-Forwarded-For', '').split(',')[0] if headers.get('X-Forwarded-For') else headers.get('Remote-Addr', '')
+        
+        # Si no hay IP, usar solo User-Agent
+        identificador = f"{ip}_{user_agent}" if ip else user_agent
+        
+        # Si el identificador está vacío, generar uno aleatorio pero persistente en la sesión
+        if not identificador:
+            if 'id_generado' not in st.session_state:
+                st.session_state.id_generado = hashlib.md5(str(time.time()).encode()).hexdigest()
+            return st.session_state.id_generado
+        
+        return hashlib.md5(identificador.encode()).hexdigest()
+        
+    except Exception:
+        # Fallback: ID basado en tiempo pero persistente en sesión
+        if 'id_fallback' not in st.session_state:
+            st.session_state.id_fallback = hashlib.md5(str(time.time()).encode()).hexdigest()
+        return st.session_state.id_fallback
+
+# ============================================
 # FUNCIONES DE ME GUSTA
 # ============================================
 def agregar_like(usuario_id):
     try:
+        # Verificar si ya existe
         existing = supabase.table("likes").select("*").eq("usuario_id", usuario_id).execute()
         
         if existing.data:
-            return True
+            return True  # Ya había dado like antes
         else:
             data = {
                 "usuario_id": usuario_id,
@@ -81,6 +110,31 @@ def ya_dio_like(usuario_id):
         return len(response.data) > 0
     except Exception:
         return False
+
+# ============================================
+# FUNCIONES DE VISITAS
+# ============================================
+def actualizar_visitas():
+    try:
+        response = supabase.table("visitas").select("conteo").eq("id", 1).execute()
+        
+        if response.data:
+            conteo_actual = response.data[0]["conteo"]
+            nuevo_conteo = conteo_actual + 1
+            supabase.table("visitas").update({"conteo": nuevo_conteo}).eq("id", 1).execute()
+        else:
+            supabase.table("visitas").insert({"id": 1, "conteo": 2500}).execute()
+    except Exception:
+        pass
+
+def get_visitas():
+    try:
+        response = supabase.table("visitas").select("conteo").eq("id", 1).execute()
+        if response.data:
+            return int(response.data[0]["conteo"])
+        return 2500
+    except Exception:
+        return 2500
 
 # ============================================
 # FUNCIONES DE COMENTARIOS
@@ -1068,26 +1122,6 @@ def delete_crimen_no_paga(id_):
 def get_portada_url():
     return "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Flag_of_Venezuela_%28state%29.svg/1200px-Flag_of_Venezuela_%28state%29.svg.png"
 
-def actualizar_visitas():
-    try:
-        response = supabase.table("visitas").select("conteo").eq("id", 1).execute()
-        if response.data:
-            conteo_actual = response.data[0]["conteo"]
-            supabase.table("visitas").update({"conteo": conteo_actual + 1}).eq("id", 1).execute()
-        else:
-            supabase.table("visitas").insert({"id": 1, "conteo": 1531}).execute()
-    except Exception:
-        pass
-
-def get_visitas():
-    try:
-        response = supabase.table("visitas").select("conteo").eq("id", 1).execute()
-        if response.data:
-            return int(response.data[0]["conteo"])
-        return 1530
-    except Exception:
-        return 1530
-
 def get_logo():
     try:
         response = supabase.table("configuracion").select("logo_url").eq("id", 1).execute()
@@ -1117,6 +1151,7 @@ def inicializar_configuracion():
 
 inicializar_configuracion()
 
+# Contador de visitas
 if 'visitante_contado' not in st.session_state:
     actualizar_visitas()
     st.session_state.visitante_contado = True
@@ -1151,30 +1186,20 @@ a {
     font-weight: bold !important;
     text-decoration: underline !important;
 }
-div[data-testid="stTabs"] {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 20px;
-}
+/* Pestañas más pequeñas */
 div[data-testid="stTabs"] button {
     background-color: #1a1a1a !important;
-    border-radius: 12px !important;
+    border-radius: 10px !important;
     color: #FFFFFF !important;
     font-weight: bold !important;
-    font-size: 13px !important;
-    padding: 8px 14px !important;
-    margin: 0 !important;
+    font-size: 12px !important;
+    padding: 6px 12px !important;
+    margin: 0 3px !important;
     border: 1px solid #FFD700 !important;
-    white-space: nowrap !important;
 }
 div[data-testid="stTabs"] button:hover {
     background-color: #FFD700 !important;
     color: #000000 !important;
-}
-div[data-testid="stTabs"] button[aria-selected="true"] {
-    background: linear-gradient(135deg, #FFD700, #CF142B) !important;
-    color: #FFFFFF !important;
 }
 .streamlit-expanderHeader {
     background-color: #1a1a1a !important;
@@ -1275,36 +1300,80 @@ document.getElementById('copyButton').addEventListener('click', function() {{
 st.markdown("---")
 
 # ============================================
-# ENCABEZADO PRINCIPAL
+# ENCABEZADO PRINCIPAL - COMPLETO CON TÍTULO
 # ============================================
 ahora = get_fecha_hora_venezuela()
 dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 visitas = get_visitas()
 dolar = get_dolar()
-portada_url = get_portada_url()
-
 hora_str = ahora.strftime("%I:%M %p").lstrip("0")
 
 st.markdown(f"""
-<div style="text-align: center; margin-bottom: 20px;">
-    <div style="background: linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55)), 
-                url('{portada_url}');
-                background-size: cover;
-                background-position: center;
-                border-radius: 20px;
-                padding: 40px 20px 30px 20px;
-                border: 3px solid #FFD700;">
-        <h1 style="color: #FFD700; text-shadow: 3px 3px 8px black; font-size: 2em; font-weight: bold;">Santa Teresa al Dia</h1>
-        <p style="color: #FFFFFF; text-shadow: 2px 2px 5px black; font-size: 1.1em; font-weight: bold;">Informacion, Cultura y Fe de nuestro pueblo</p>
-        <div style="margin-top: 20px; padding-top: 8px; border-top: 1px solid rgba(255, 215, 0, 0.5);">
-            <p style="color: #FFD700; font-size: 0.8em; margin: 0; font-weight: bold;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</p>
-            <p style="color: white; font-size: 1em; margin: 5px 0; font-weight: bold;">🕐 {hora_str}</p>
-            <p style="color: #FFD700; font-size: 0.8em; margin: 0; font-weight: bold;">👥 Visitantes: {visitas:,} | 💵 Dólar BCV: {dolar:.2f} Bs</p>
+<div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 15px; padding: 15px 20px; border: 1px solid #FFD700; margin-bottom: 15px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div style="flex: 2; min-width: 180px;">
+            <div style="font-size: 1.5em; font-weight: bold; color: #FFD700;">Santa Teresa al Dia</div>
+        </div>
+        <div style="flex: 1; min-width: 150px; text-align: center;">
+            <div style="font-size: 0.8em; color: #FFD700;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</div>
+        </div>
+        <div style="flex: 0.5; min-width: 80px; text-align: center;">
+            <div style="font-size: 0.9em; color: #FFFFFF;">🕐 {hora_str}</div>
+        </div>
+        <div style="flex: 1.5; min-width: 200px; text-align: right;">
+            <div style="font-size: 0.8em; color: #FFD700;">👥 Visitantes: {visitas:,} | 💵 Dólar BCV: {dolar:.2f} Bs</div>
         </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ============================================
+# SECCIÓN DE ME GUSTA - TODO EN UNA SOLA LÍNEA
+# ============================================
+# Obtener ID de usuario permanente (basado en IP + User-Agent)
+usuario_id_permanente = obtener_usuario_id_permanente()
+ya_like = ya_dio_like(usuario_id_permanente)
+total_likes = obtener_total_likes()
+
+col_like1, col_like2, col_like3, col_like4, col_like5 = st.columns([1, 1, 1, 1, 1])
+
+with col_like2:
+    st.markdown("""
+    <div style="text-align: center;">
+        <span style="font-size: 1.5em;">❤️</span>
+        <span style="font-size: 0.9em;">Apoya</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_like3:
+    st.markdown(f"""
+    <div style="text-align: center;">
+        <span style="font-size: 1.8em;">👍</span>
+        <span style="font-size: 1.3em; font-weight: bold; color: #FFD700;">{total_likes:,}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_like4:
+    st.markdown("""
+    <div style="text-align: center;">
+        <span style="font-size: 0.8em;">Personas apoyan</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_like5:
+    if not ya_like:
+        if st.button("👍 Dar Me gusta", use_container_width=True, key="btn_like_global"):
+            if agregar_like(usuario_id_permanente):
+                st.success("✅ Gracias por tu like!")
+                st.balloons()
+                st.rerun()
+            else:
+                st.error("❌ Error al registrar like")
+    else:
+        st.info("❤️ ¡Gracias por tu apoyo!")
+
+st.markdown("---")
 
 # ============================================
 # SIDEBAR ADMIN
@@ -1337,61 +1406,61 @@ with st.sidebar:
         
         st.markdown("---")
         st.markdown("### 📊 Estadísticas")
-        total_likes_sidebar = obtener_total_likes()
-        st.metric("👍 Me gusta", f"{total_likes_sidebar:,}")
+        st.metric("👍 Me gusta", f"{total_likes:,}")
+        st.metric("👥 Visitantes", f"{visitas:,}")
     else:
         st.session_state.es_admin = False
 
 # ============================================
-# MENU PRINCIPAL (TABS) - ORGANIZADO EN TRES LÍNEAS
+# MENU PRINCIPAL (TABS) - CON PESTAÑAS MÁS PEQUEÑAS
 # ============================================
 
 # Línea 1: Secciones principales
 st.markdown("### 📌 Secciones Principales")
 col_linea1 = st.columns(4)
 with col_linea1[0]:
-    if st.button("🏠 Portada", use_container_width=True):
+    if st.button("🏠 Portada", use_container_width=True, key="tab_0"):
         st.session_state.selected_tab = 0
 with col_linea1[1]:
-    if st.button("📰 Noticias", use_container_width=True):
+    if st.button("📰 Noticias", use_container_width=True, key="tab_1"):
         st.session_state.selected_tab = 1
 with col_linea1[2]:
-    if st.button("📍 Donde ir - Donde comprar", use_container_width=True):
+    if st.button("📍 Donde ir - Donde comprar", use_container_width=True, key="tab_2"):
         st.session_state.selected_tab = 2
 with col_linea1[3]:
-    if st.button("💭 Reflexiones", use_container_width=True):
+    if st.button("💭 Reflexiones", use_container_width=True, key="tab_3"):
         st.session_state.selected_tab = 3
 
 # Línea 2: Contenido multimedia
 st.markdown("### 🎬 Contenido Multimedia")
 col_linea2 = st.columns(4)
 with col_linea2[0]:
-    if st.button("📜 Crónicas", use_container_width=True):
+    if st.button("📜 Crónicas", use_container_width=True, key="tab_4"):
         st.session_state.selected_tab = 4
 with col_linea2[1]:
-    if st.button("🎬 Multimedia", use_container_width=True):
+    if st.button("🎬 Multimedia", use_container_width=True, key="tab_5"):
         st.session_state.selected_tab = 5
 with col_linea2[2]:
-    if st.button("⚠️ Denuncias", use_container_width=True):
+    if st.button("⚠️ Denuncias", use_container_width=True, key="tab_6"):
         st.session_state.selected_tab = 6
 with col_linea2[3]:
-    if st.button("💬 Opiniones", use_container_width=True):
+    if st.button("💬 Opiniones", use_container_width=True, key="tab_7"):
         st.session_state.selected_tab = 7
 
 # Línea 3: Otras secciones
 st.markdown("### 📖 Otras Secciones")
 col_linea3 = st.columns(4)
 with col_linea3[0]:
-    if st.button("👥 Personajes", use_container_width=True):
+    if st.button("👥 Personajes", use_container_width=True, key="tab_8"):
         st.session_state.selected_tab = 8
 with col_linea3[1]:
-    if st.button("⚖️ El Crimen No Paga", use_container_width=True):
+    if st.button("⚖️ El Crimen No Paga", use_container_width=True, key="tab_9"):
         st.session_state.selected_tab = 9
 with col_linea3[2]:
-    if st.button("📅 Efemérides Médicas", use_container_width=True):
+    if st.button("📅 Efemérides Médicas", use_container_width=True, key="tab_10"):
         st.session_state.selected_tab = 10
 with col_linea3[3]:
-    st.markdown(" ")  # Espacio vacío para equilibrio
+    st.markdown(" ")
 
 st.markdown("---")
 
@@ -1399,70 +1468,12 @@ st.markdown("---")
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = 0
 
-# Mostrar contenido según la pestaña seleccionada
+# ============================================
+# CONTENIDO DE LAS SECCIONES (Portada, Noticias, etc.)
+# ============================================
+
 if st.session_state.selected_tab == 0:
     # --- PORTADA ---
-    # Título más pequeño
-    st.markdown("""
-    <div style="text-align: center; margin-bottom: 20px;">
-        <h2 style="color: #FFD700; font-weight: bold; font-size: 1.8em;">Santa Teresa al Dia</h2>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if 'usuario_id' not in st.session_state:
-        session_id = str(time.time()) + str(st.session_state.get('admin_pass', ''))
-        st.session_state.usuario_id = hashlib.md5(session_id.encode()).hexdigest()
-    
-    ya_like = ya_dio_like(st.session_state.usuario_id)
-    total_likes = obtener_total_likes()
-    
-    st.markdown("""
-    <div style="text-align: center; margin: 10px 0;">
-        <h3 style="color: #FFD700; font-size: 1.2em; margin-bottom: 10px;">❤️ Apoya nuestra página</h3>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col_like1, col_like2, col_like3 = st.columns([1, 2, 1])
-    
-    with col_like2:
-        col_icon, col_number, col_text = st.columns([1, 1, 2])
-        
-        with col_icon:
-            st.markdown("""
-            <div style="text-align: center;">
-                <div style="font-size: 28px; color: #FFD700;">👍</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col_number:
-            st.markdown(f"""
-            <div style="text-align: center;">
-                <div style="font-size: 24px; font-weight: bold; color: #FFD700;">{total_likes:,}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col_text:
-            st.markdown("""
-            <div style="text-align: left;">
-                <div style="font-size: 12px;">Personas apoyan esta página</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True)
-        
-        if not ya_like:
-            if st.button("👍 Dar Me gusta", use_container_width=True, key="btn_like_portada"):
-                if agregar_like(st.session_state.usuario_id):
-                    st.success("✅ Gracias por tu like!")
-                    st.balloons()
-                    st.rerun()
-                else:
-                    st.error("❌ Error al registrar like")
-        else:
-            st.info("❤️ ¡Gracias por apoyar nuestra página!")
-    
-    st.markdown("---")
-    
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("### 📰 Últimas Noticias")
@@ -1500,7 +1511,6 @@ if st.session_state.selected_tab == 0:
             st.info("No hay reflexión activa")
 
 elif st.session_state.selected_tab == 1:
-    # --- NOTICIAS ---
     st.title("📰 Noticias")
     tab_nac, tab_inter, tab_dep, tab_suc, tab_far, tab_rep = st.tabs(["🇻🇪 Nacionales", "🌎 Internacionales", "⚽ Deportes", "🚨 Sucesos", "🎭 Farándula", "📽️ Reportajes"])
     
@@ -1571,11 +1581,8 @@ elif st.session_state.selected_tab == 1:
             st.info("No hay Reportajes disponibles")
 
 elif st.session_state.selected_tab == 2:
-    # --- NEGOCIOS ---
     st.title("📍 Donde ir - Donde comprar")
-    
     negocios = get_negocios()
-    
     if not negocios.empty:
         for _, n in negocios.iterrows():
             with st.expander(f"🏪 {n['nombre']}"):
@@ -1586,14 +1593,11 @@ elif st.session_state.selected_tab == 2:
                         mostrar_imagen_segura(n['imagenes_url'], 300)
                 else:
                     st.caption("📷 Sin imágenes")
-                
                 st.write(f"**Reseña:** {n['resena']}")
                 if n.get('google_maps_url') and n['google_maps_url']:
                     st.markdown(f"📍 [Ver ubicación en Google Maps]({n['google_maps_url']})")
-                
                 st.markdown("---")
                 st.markdown("### 💬 Opiniones de este negocio")
-                
                 with st.form(f"opinion_form_{n['id']}"):
                     st.markdown("#### Deja tu opinión")
                     nombre_usuario = st.text_input("Tu nombre", key=f"nombre_{n['id']}")
@@ -1608,7 +1612,6 @@ elif st.session_state.selected_tab == 2:
                                 st.error("❌ Error al enviar opinión")
                         else:
                             st.error("❌ Nombre y comentario son obligatorios")
-                
                 opiniones = get_opiniones_negocio(n['id'])
                 if not opiniones.empty:
                     for _, op in opiniones.iterrows():
@@ -1623,7 +1626,6 @@ elif st.session_state.selected_tab == 2:
         st.info("No hay negocios agregados aún")
 
 elif st.session_state.selected_tab == 3:
-    # --- REFLEXIONES ---
     st.title("💭 Reflexiones")
     ref = get_reflexion_activa()
     if ref:
@@ -1635,7 +1637,6 @@ elif st.session_state.selected_tab == 3:
             mostrar_seccion_comentarios("reflexion", ref['id'], ref['titulo'])
     else:
         st.info("No hay reflexión activa")
-    
     st.markdown("---")
     st.markdown("### 📜 Reflexiones Anteriores")
     reflexiones = get_reflexiones()
@@ -1651,7 +1652,6 @@ elif st.session_state.selected_tab == 3:
         st.info("No hay reflexiones anteriores")
 
 elif st.session_state.selected_tab == 4:
-    # --- CRONICAS ---
     st.title("📜 Crónicas")
     estados = ["Todos", "Miranda", "Carabobo", "Distrito Capital", "Zulia", "Lara", "Aragua", "Bolivar", "Anzoategui", "Merida", "Tachira", "Nueva Esparta", "Sucre", "Falcon", "Barinas", "Portuguesa", "Guarico", "Cojedes", "Trujillo", "Yaracuy", "Apure", "Amazonas", "Delta Amacuro", "Vargas"]
     estado_filtro = st.selectbox("Filtrar por estado:", estados)
@@ -1671,7 +1671,6 @@ elif st.session_state.selected_tab == 4:
         st.info("No hay crónicas disponibles")
 
 elif st.session_state.selected_tab == 5:
-    # --- MULTIMEDIA ---
     st.title("🎬 Multimedia")
     tab_vid, tab_tik, tab_mus, tab_rad = st.tabs(["🎥 YouTube", "📱 TikTok", "🎵 Música", "📻 Radio"])
     
@@ -1729,47 +1728,28 @@ elif st.session_state.selected_tab == 5:
     
     with tab_rad:
         st.markdown("### 📻 Radio Online")
-        
-        radio_opcion = st.selectbox(
-            "Selecciona una emisora:",
-            ["Love Songs Radio", "Radio Romántica", "Radio Latina FM", "Radio Instrumental"]
-        )
-        
+        radio_opcion = st.selectbox("Selecciona una emisora:", ["Love Songs Radio", "Radio Romántica", "Radio Latina FM", "Radio Instrumental"])
         if radio_opcion == "Love Songs Radio":
             st.markdown("#### 🎵 Love Songs Radio")
-            radio_iframe = """
-            <iframe 
-                src="https://hearme.fm/embed/love-songs" 
-                width="100%" 
-                height="200" 
-                frameborder="0" 
-                allowtransparency 
-                allow="autoplay">
-            </iframe>
-            """
+            radio_iframe = '<iframe src="https://hearme.fm/embed/love-songs" width="100%" height="200" frameborder="0" allowtransparency allow="autoplay"></iframe>'
             st.markdown(radio_iframe, unsafe_allow_html=True)
             st.caption("🎶 Música romántica las 24 horas")
-        
         elif radio_opcion == "Radio Romántica":
             st.markdown("#### 🎵 Radio Romántica")
             st.audio("https://streamingecuador.com:8000/romantica.mp3", format="audio/mp3")
             st.caption("🎶 Los mejores éxitos románticos")
-        
         elif radio_opcion == "Radio Latina FM":
             st.markdown("#### 🎵 Radio Latina FM")
             st.audio("https://playerservices.streamtheworld.com/api/livestream-redirect/LA_KQ_FMAAC.aac", format="audio/aac")
             st.caption("🎶 Música latina actual")
-        
         elif radio_opcion == "Radio Instrumental":
             st.markdown("#### 🎵 Radio Instrumental")
             st.audio("http://streaming.radionomy.com/InstrumentalSongs", format="audio/mp3")
             st.caption("🎶 Música instrumental para relajarse")
 
 elif st.session_state.selected_tab == 6:
-    # --- DENUNCIAS ---
     st.title("⚠️ Denuncias Ciudadanas")
     tab_den, tab_ver = st.tabs(["📝 Hacer Denuncia", "👁️ Ver Denuncias"])
-    
     with tab_den:
         with st.form("fd"):
             nombre = st.text_input("Nombre (opcional)")
@@ -1785,7 +1765,6 @@ elif st.session_state.selected_tab == 6:
                         st.error("❌ Error al enviar denuncia")
                 else:
                     st.error("❌ Título y descripción son obligatorios")
-    
     with tab_ver:
         denuncias = get_denuncias()
         if not denuncias.empty:
@@ -1801,10 +1780,8 @@ elif st.session_state.selected_tab == 6:
             st.info("No hay denuncias registradas")
 
 elif st.session_state.selected_tab == 7:
-    # --- OPINIONES ---
     st.title("💬 Opiniones")
     tab_op, tab_ver_op = st.tabs(["✍️ Dar Opinión", "👁️ Ver Opiniones"])
-    
     with tab_op:
         with st.form("fo"):
             usuario = st.text_input("Nombre *")
@@ -1819,7 +1796,6 @@ elif st.session_state.selected_tab == 7:
                         st.error("❌ Error al enviar opinión")
                 else:
                     st.error("❌ Nombre y comentario son obligatorios")
-    
     with tab_ver_op:
         opiniones = get_opiniones(aprobadas=True)
         if not opiniones.empty:
@@ -1833,11 +1809,8 @@ elif st.session_state.selected_tab == 7:
             st.info("No hay opiniones aprobadas")
 
 elif st.session_state.selected_tab == 8:
-    # --- PERSONAJES ---
     st.title("👥 Personajes que hicieron historia")
-    
     st.markdown("### 📋 Personajes Registrados")
-    
     personajes = get_personajes()
     if not personajes.empty:
         for _, p in personajes.iterrows():
@@ -1849,12 +1822,9 @@ elif st.session_state.selected_tab == 8:
         st.info("No hay personajes registrados")
 
 elif st.session_state.selected_tab == 9:
-    # --- EL CRIMEN NO PAGA ---
     st.title("⚖️ El Crimen No Paga")
     st.markdown("### Casos y noticias sobre justicia")
-    
     crimenes = get_crimen_no_paga()
-    
     if not crimenes.empty:
         for _, c in crimenes.iterrows():
             with st.expander(f"⚖️ {c['titulo']} - {c['fecha']}"):
@@ -1870,11 +1840,9 @@ elif st.session_state.selected_tab == 9:
         st.info("No hay casos registrados")
 
 elif st.session_state.selected_tab == 10:
-    # --- EFEMÉRIDES MÉDICAS ---
     st.title("📅 Efemérides Médicas")
     fecha_actual_str = f"{ahora.day} de {meses[ahora.month-1]}"
     st.markdown(f"### 📌 {dias[ahora.weekday()]}, {fecha_actual_str} de {ahora.year}")
-    
     col_ven, col_mundo = st.columns(2)
     with col_ven:
         st.markdown("#### 🇻🇪 Venezuela")
@@ -1896,7 +1864,6 @@ elif st.session_state.selected_tab == 10:
         st.markdown("**📅 Otras efemérides:**")
         for fecha, texto in efemerides_venezuela.items():
             st.markdown(f"- **{fecha}:** {texto}")
-    
     with col_mundo:
         st.markdown("#### 🌎 Mundo")
         efemerides_mundo = {
@@ -2638,6 +2605,12 @@ if st.session_state.get('es_admin', False):
         
         with col_est3:
             st.metric("👥 Apoyan la página", f"{total_likes_admin:,}")
+        
+        st.markdown("---")
+        
+        st.markdown("### 👥 Estadísticas de Visitantes")
+        visitas_admin = get_visitas()
+        st.metric("🚪 Total Visitantes", f"{visitas_admin:,}")
         
         st.markdown("---")
         
