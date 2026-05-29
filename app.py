@@ -50,26 +50,17 @@ def actualizar_dolar_manual(nuevo_valor):
 # FUNCIÓN PARA OBTENER ID DE USUARIO PERMANENTE
 # ============================================
 def obtener_usuario_id_permanente():
-    """Genera ID único basado en IP y User-Agent (no cambia si el usuario vuelve)"""
     try:
-        # Obtener headers
         headers = st.context.headers
         user_agent = headers.get('User-Agent', '')
         ip = headers.get('X-Forwarded-For', '').split(',')[0] if headers.get('X-Forwarded-For') else headers.get('Remote-Addr', '')
-        
-        # Si no hay IP, usar solo User-Agent
         identificador = f"{ip}_{user_agent}" if ip else user_agent
-        
-        # Si el identificador está vacío, generar uno aleatorio pero persistente en la sesión
         if not identificador:
             if 'id_generado' not in st.session_state:
                 st.session_state.id_generado = hashlib.md5(str(time.time()).encode()).hexdigest()
             return st.session_state.id_generado
-        
         return hashlib.md5(identificador.encode()).hexdigest()
-        
     except Exception:
-        # Fallback: ID basado en tiempo pero persistente en sesión
         if 'id_fallback' not in st.session_state:
             st.session_state.id_fallback = hashlib.md5(str(time.time()).encode()).hexdigest()
         return st.session_state.id_fallback
@@ -79,11 +70,9 @@ def obtener_usuario_id_permanente():
 # ============================================
 def agregar_like(usuario_id):
     try:
-        # Verificar si ya existe
         existing = supabase.table("likes").select("*").eq("usuario_id", usuario_id).execute()
-        
         if existing.data:
-            return True  # Ya había dado like antes
+            return False
         else:
             data = {
                 "usuario_id": usuario_id,
@@ -92,7 +81,6 @@ def agregar_like(usuario_id):
             }
             result = supabase.table("likes").insert(data).execute()
             return True if result.data else False
-            
     except Exception as e:
         st.error(f"Error al agregar like: {str(e)}")
         return False
@@ -117,7 +105,6 @@ def ya_dio_like(usuario_id):
 def actualizar_visitas():
     try:
         response = supabase.table("visitas").select("conteo").eq("id", 1).execute()
-        
         if response.data:
             conteo_actual = response.data[0]["conteo"]
             nuevo_conteo = conteo_actual + 1
@@ -192,7 +179,6 @@ def mostrar_seccion_comentarios(seccion, item_id, titulo_item):
                 st.error("❌ Escribe un comentario antes de enviar")
     
     comentarios = obtener_comentarios(seccion, item_id)
-    
     if not comentarios.empty:
         st.markdown(f"#### 📌 {len(comentarios)} comentarios")
         for _, com in comentarios.iterrows():
@@ -210,31 +196,24 @@ def optimizar_imagen(file, max_width=1024, quality=75):
     try:
         if file is None:
             return None
-        
         img = Image.open(file)
-        
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
-        
         if img.width > max_width:
             ratio = max_width / img.width
             nuevo_alto = int(img.height * ratio)
             img = img.resize((max_width, nuevo_alto), Image.Resampling.LANCZOS)
-        
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG", quality=quality, optimize=True)
         buffer.seek(0)
-        
         class OptimizedFile:
             def __init__(self, buffer, original_name):
                 self.buffer = buffer
                 self.name = original_name.rsplit('.', 1)[0] + '.jpg'
                 self.type = "image/jpeg"
                 self.size = len(buffer.getvalue())
-            
             def getvalue(self):
                 return self.buffer.getvalue()
-        
         return OptimizedFile(buffer, file.name)
     except Exception:
         return file
@@ -246,19 +225,15 @@ def subir_imagen_storage(file, carpeta="imagenes"):
     try:
         if file is None:
             return None
-        
         archivo_optimizado = optimizar_imagen(file)
         if archivo_optimizado is None:
             return None
-        
         nombre_archivo = f"{carpeta}/{uuid.uuid4()}.jpg"
-        
         supabase.storage.from_("imagenes").upload(
             nombre_archivo,
             archivo_optimizado.getvalue(),
             {"content-type": "image/jpeg"}
         )
-        
         url = supabase.storage.from_("imagenes").get_public_url(nombre_archivo)
         return url
     except Exception as e:
@@ -278,15 +253,12 @@ def subir_audio_storage(file):
     try:
         if file is None:
             return None
-        
         nombre_archivo = f"audio_{uuid.uuid4()}.mp3"
-        
         supabase.storage.from_("imagenes").upload(
             nombre_archivo,
             file.getvalue(),
             {"content-type": "audio/mpeg"}
         )
-        
         url = supabase.storage.from_("imagenes").get_public_url(nombre_archivo)
         return url
     except Exception as e:
@@ -296,9 +268,7 @@ def subir_audio_storage(file):
 def extraer_video_id(url_youtube):
     if not url_youtube:
         return None
-    
     url_youtube = url_youtube.strip()
-    
     patterns = [
         r'(?:youtube\.com\/watch\?v=)([\w-]+)',
         r'(?:youtu\.be\/)([\w-]+)',
@@ -306,15 +276,12 @@ def extraer_video_id(url_youtube):
         r'(?:youtube\.com\/v\/)([\w-]+)',
         r'(?:youtube\.com\/shorts\/)([\w-]+)'
     ]
-    
     for pattern in patterns:
         match = re.search(pattern, url_youtube)
         if match:
             return match.group(1)
-    
     if re.match(r'^[\w-]+$', url_youtube):
         return url_youtube
-    
     return None
 
 def mostrar_video_youtube(url_youtube, width_percent=25):
@@ -354,25 +321,20 @@ def mostrar_musica(url_audio):
 def extraer_tiktok_id(url_tiktok):
     if not url_tiktok:
         return None
-    
     url_tiktok = url_tiktok.strip()
-    
     patterns = [
         r'tiktok\.com/(?:@[\w.-]+/video/|v/|embed/)(\d+)',
         r'tiktok\.com/t/([\w-]+)',
         r'vm\.tiktok\.com/([\w-]+)'
     ]
-    
     for pattern in patterns:
         match = re.search(pattern, url_tiktok)
         if match:
             return match.group(1)
-    
     return None
 
 def mostrar_tiktok(url_tiktok, width_percent=25):
     tiktok_id = extraer_tiktok_id(url_tiktok)
-    
     if tiktok_id:
         html = f"""
         <div style="width: {width_percent}%; margin: 0 auto;">
@@ -398,10 +360,8 @@ def mostrar_tiktok(url_tiktok, width_percent=25):
 def mostrar_imagenes_en_fila(urls, max_imagenes=3):
     if not urls:
         return
-    
     urls_mostrar = urls[:max_imagenes]
     cols = st.columns(len(urls_mostrar))
-    
     for i, url in enumerate(urls_mostrar):
         with cols[i]:
             st.image(url, use_container_width=True)
@@ -497,7 +457,6 @@ def update_noticia(id_, titulo, categoria, contenido, imagen):
             existing = supabase.table("noticias").select("imagen_url").eq("id", id_).execute()
             if existing.data:
                 img_url = existing.data[0].get("imagen_url")
-        
         data = {
             "titulo": titulo,
             "categoria": categoria,
@@ -554,7 +513,6 @@ def update_negocio(id_, nombre, resena, google_maps_url, imagenes):
             existing = supabase.table("negocios").select("imagenes_url").eq("id", id_).execute()
             if existing.data:
                 imagenes_urls = existing.data[0].get("imagenes_url")
-        
         data = {
             "nombre": nombre,
             "resena": resena,
@@ -618,12 +576,10 @@ def delete_opinion_negocio(id_):
 def add_reflexion(titulo, contenido, versiculo):
     try:
         ahora = get_fecha_hora_venezuela()
-        
         try:
             supabase.table("reflexiones").update({"activo": False}).execute()
         except:
             pass
-        
         data = {
             "titulo": titulo,
             "contenido": contenido,
@@ -632,7 +588,6 @@ def add_reflexion(titulo, contenido, versiculo):
             "fecha": ahora.strftime("%d/%m/%Y"),
             "activo": True
         }
-        
         result = supabase.table("reflexiones").insert(data).execute()
         return True if result.data else False
     except Exception as e:
@@ -657,7 +612,6 @@ def get_reflexion_activa():
         response = supabase.table("reflexiones").select("*").eq("activo", True).limit(1).execute()
         if response.data:
             return response.data[0]
-        
         response = supabase.table("reflexiones").select("*").order("id", desc=True).limit(1).execute()
         if response.data:
             return response.data[0]
@@ -715,7 +669,6 @@ def update_cronica(id_, titulo, contenido, lugar, estado, imagenes):
             existing = supabase.table("cronicas").select("imagenes_url").eq("id", id_).execute()
             if existing.data:
                 imagenes_urls = existing.data[0].get("imagenes_url")
-        
         data = {
             "titulo": titulo,
             "contenido": contenido,
@@ -751,31 +704,25 @@ def add_video(titulo, url_youtube):
         if not url_youtube or url_youtube.strip() == "":
             st.error("❌ La URL del video es obligatoria")
             return False
-        
         video_id = extraer_video_id(url_youtube)
         if not video_id:
             st.error("❌ URL de YouTube no válida")
             return False
-        
         ahora = get_fecha_hora_venezuela()
         video_url_limpia = f"https://www.youtube.com/watch?v={video_id}"
-        
         data = {
             "titulo": titulo,
             "video_url": video_url_limpia,
             "formato": "youtube",
             "fecha": ahora.strftime("%d/%m/%Y")
         }
-        
         result = supabase.table("videos").insert(data).execute()
-        
         if result.data:
             st.success("✅ Video agregado correctamente")
             return True
         else:
             st.error("❌ Error: No se pudo guardar el video")
             return False
-            
     except Exception as e:
         st.error(f"❌ Error al agregar video: {str(e)}")
         return False
@@ -785,14 +732,11 @@ def update_video(id_, titulo, url_youtube):
         if not url_youtube or url_youtube.strip() == "":
             st.error("❌ La URL del video es obligatoria")
             return False
-        
         video_id = extraer_video_id(url_youtube)
         if not video_id:
             st.error("❌ URL de YouTube no válida")
             return False
-        
         video_url_limpia = f"https://www.youtube.com/watch?v={video_id}"
-        
         data = {
             "titulo": titulo,
             "video_url": video_url_limpia
@@ -827,28 +771,22 @@ def add_tiktok(titulo, url_tiktok):
         if not titulo or titulo.strip() == "":
             st.error("❌ El título es obligatorio")
             return False
-        
         if not url_tiktok or url_tiktok.strip() == "":
             st.error("❌ La URL de TikTok es obligatoria")
             return False
-        
         ahora = get_fecha_hora_venezuela()
-        
         data = {
             "titulo": titulo,
             "tiktok_url": url_tiktok,
             "fecha": ahora.strftime("%d/%m/%Y")
         }
-        
         result = supabase.table("tiktoks").insert(data).execute()
-        
         if result.data:
             st.success(f"✅ Video de TikTok agregado correctamente")
             return True
         else:
             st.error("❌ Error al guardar en la base de datos")
             return False
-            
     except Exception as e:
         st.error(f"❌ Error al agregar TikTok: {str(e)}")
         return False
@@ -877,38 +815,29 @@ def add_musica(titulo, audio_file):
         if not titulo or titulo.strip() == "":
             st.error("❌ El título es obligatorio")
             return False
-        
         if not audio_file:
             st.error("❌ Debes seleccionar un archivo de audio")
             return False
-        
         if not audio_file.name.lower().endswith('.mp3'):
             st.error("❌ Solo se permiten archivos MP3")
             return False
-        
         ahora = get_fecha_hora_venezuela()
-        
         audio_url = subir_audio_storage(audio_file)
-        
         if not audio_url:
             st.error("❌ Error al subir el archivo de audio")
             return False
-        
         data = {
             "titulo": titulo,
             "audio_url": audio_url,
             "fecha": ahora.strftime("%d/%m/%Y")
         }
-        
         result = supabase.table("musicas").insert(data).execute()
-        
         if result.data:
             st.success(f"✅ Música '{titulo}' agregada correctamente")
             return True
         else:
             st.error("❌ Error al guardar en la base de datos")
             return False
-            
     except Exception as e:
         st.error(f"❌ Error al agregar música: {str(e)}")
         return False
@@ -1038,7 +967,6 @@ def update_personaje(id_, nombre, descripcion, imagen, fecha):
             existing = supabase.table("personajes").select("imagen_url").eq("id", id_).execute()
             if existing.data:
                 img_url = existing.data[0].get("imagen_url")
-        
         data = {
             "nombre": nombre,
             "descripcion": descripcion,
@@ -1079,7 +1007,7 @@ def add_crimen_no_paga(titulo, descripcion, imagenes):
         result = supabase.table("crimen_no_paga").insert(data).execute()
         return True if result.data else False
     except Exception as e:
-        st.error(f"Error al agregar: {str(e)}")
+        st.error(f"Error al agregar caso: {str(e)}")
         return False
 
 def update_crimen_no_paga(id_, titulo, descripcion, imagenes):
@@ -1091,7 +1019,6 @@ def update_crimen_no_paga(id_, titulo, descripcion, imagenes):
             existing = supabase.table("crimen_no_paga").select("imagenes_url").eq("id", id_).execute()
             if existing.data:
                 imagenes_urls = existing.data[0].get("imagenes_url")
-        
         data = {
             "titulo": titulo,
             "descripcion": descripcion,
@@ -1151,7 +1078,6 @@ def inicializar_configuracion():
 
 inicializar_configuracion()
 
-# Contador de visitas
 if 'visitante_contado' not in st.session_state:
     actualizar_visitas()
     st.session_state.visitante_contado = True
@@ -1186,7 +1112,6 @@ a {
     font-weight: bold !important;
     text-decoration: underline !important;
 }
-/* Pestañas más pequeñas */
 div[data-testid="stTabs"] button {
     background-color: #1a1a1a !important;
     border-radius: 10px !important;
@@ -1300,7 +1225,7 @@ document.getElementById('copyButton').addEventListener('click', function() {{
 st.markdown("---")
 
 # ============================================
-# ENCABEZADO PRINCIPAL - COMPLETO CON TÍTULO
+# ENCABEZADO PRINCIPAL
 # ============================================
 ahora = get_fecha_hora_venezuela()
 dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
@@ -1309,32 +1234,29 @@ visitas = get_visitas()
 dolar = get_dolar()
 hora_str = ahora.strftime("%I:%M %p").lstrip("0")
 
+st.markdown("""
+<div style="text-align: center; margin: 30px 0 20px 0;">
+    <div style="font-size: 3.5em; font-weight: bold; color: #FFD700; text-shadow: 3px 3px 5px black;">Santa Teresa al Dia</div>
+    <div style="font-size: 1.2em; color: #FFFFFF; margin-top: 5px;">Informacion, Cultura y Fe de nuestro pueblo</div>
+</div>
+""", unsafe_allow_html=True)
+
 st.markdown(f"""
-<div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border-radius: 15px; padding: 15px 20px; border: 1px solid #FFD700; margin-bottom: 15px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <div style="flex: 2; min-width: 180px;">
-            <div style="font-size: 1.5em; font-weight: bold; color: #FFD700;">Santa Teresa al Dia</div>
-        </div>
-        <div style="flex: 1; min-width: 150px; text-align: center;">
-            <div style="font-size: 0.8em; color: #FFD700;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</div>
-        </div>
-        <div style="flex: 0.5; min-width: 80px; text-align: center;">
-            <div style="font-size: 0.9em; color: #FFFFFF;">🕐 {hora_str}</div>
-        </div>
-        <div style="flex: 1.5; min-width: 200px; text-align: right;">
-            <div style="font-size: 0.8em; color: #FFD700;">👥 Visitantes: {visitas:,} | 💵 Dólar BCV: {dolar:.2f} Bs</div>
-        </div>
-    </div>
+<div style="text-align: center; margin: 10px 0 20px 0;">
+    <div style="font-size: 0.85em; color: #FFD700;">⭐ {dias[ahora.weekday()]}, {ahora.day} de {meses[ahora.month-1]} de {ahora.year} ⭐</div>
+    <div style="font-size: 0.9em; color: #FFFFFF; margin: 3px 0;">🕐 {hora_str}</div>
+    <div style="font-size: 0.85em; color: #FFD700;">👥 Visitantes: {visitas:,} | 💵 Dólar BCV: {dolar:.2f} Bs</div>
 </div>
 """, unsafe_allow_html=True)
 
 # ============================================
-# SECCIÓN DE ME GUSTA - TODO EN UNA SOLA LÍNEA
+# SECCIÓN DE ME GUSTA
 # ============================================
-# Obtener ID de usuario permanente (basado en IP + User-Agent)
 usuario_id_permanente = obtener_usuario_id_permanente()
 ya_like = ya_dio_like(usuario_id_permanente)
 total_likes = obtener_total_likes()
+
+st.markdown("---")
 
 col_like1, col_like2, col_like3, col_like4, col_like5 = st.columns([1, 1, 1, 1, 1])
 
@@ -1408,14 +1330,16 @@ with st.sidebar:
         st.markdown("### 📊 Estadísticas")
         st.metric("👍 Me gusta", f"{total_likes:,}")
         st.metric("👥 Visitantes", f"{visitas:,}")
+        
+        with st.expander("🔧 Depuración"):
+            st.code(f"Tu ID permanente: {usuario_id_permanente}")
     else:
         st.session_state.es_admin = False
 
 # ============================================
-# MENU PRINCIPAL (TABS) - CON PESTAÑAS MÁS PEQUEÑAS
+# MENU PRINCIPAL
 # ============================================
 
-# Línea 1: Secciones principales
 st.markdown("### 📌 Secciones Principales")
 col_linea1 = st.columns(4)
 with col_linea1[0]:
@@ -1431,7 +1355,6 @@ with col_linea1[3]:
     if st.button("💭 Reflexiones", use_container_width=True, key="tab_3"):
         st.session_state.selected_tab = 3
 
-# Línea 2: Contenido multimedia
 st.markdown("### 🎬 Contenido Multimedia")
 col_linea2 = st.columns(4)
 with col_linea2[0]:
@@ -1447,7 +1370,6 @@ with col_linea2[3]:
     if st.button("💬 Opiniones", use_container_width=True, key="tab_7"):
         st.session_state.selected_tab = 7
 
-# Línea 3: Otras secciones
 st.markdown("### 📖 Otras Secciones")
 col_linea3 = st.columns(4)
 with col_linea3[0]:
@@ -1464,16 +1386,14 @@ with col_linea3[3]:
 
 st.markdown("---")
 
-# Inicializar sesión para la pestaña seleccionada
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = 0
 
 # ============================================
-# CONTENIDO DE LAS SECCIONES (Portada, Noticias, etc.)
+# CONTENIDO DE LAS SECCIONES
 # ============================================
 
 if st.session_state.selected_tab == 0:
-    # --- PORTADA ---
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("### 📰 Últimas Noticias")
@@ -2531,7 +2451,7 @@ if st.session_state.get('es_admin', False):
                             st.success("✅ Caso agregado correctamente")
                             st.rerun()
                         else:
-                            st.error("❌ Error al agregar caso")
+                            st.error("❌ Error al agregar caso. Verifica la conexión con Supabase.")
                     else:
                         st.error("❌ Título y descripción son obligatorios")
         
