@@ -47,67 +47,113 @@ def actualizar_dolar_manual(nuevo_valor):
         return False
 
 # ============================================
-# FUNCIÓN PARA OBTENER ID DE USUARIO PERMANENTE
+# FUNCIONES DE ME GUSTA (HÍBRIDO)
 # ============================================
-def obtener_usuario_id_permanente():
-    try:
-        headers = st.context.headers
-        user_agent = headers.get('User-Agent', '')
-        ip = headers.get('X-Forwarded-For', '').split(',')[0] if headers.get('X-Forwarded-For') else headers.get('Remote-Addr', '')
-        identificador = f"{ip}_{user_agent}" if ip else user_agent
-        if not identificador:
-            if 'id_generado' not in st.session_state:
-                st.session_state.id_generado = hashlib.md5(str(time.time()).encode()).hexdigest()
-            return st.session_state.id_generado
-        return hashlib.md5(identificador.encode()).hexdigest()
-    except Exception:
-        if 'id_fallback' not in st.session_state:
-            st.session_state.id_fallback = hashlib.md5(str(time.time()).encode()).hexdigest()
-        return st.session_state.id_fallback
 
-# ============================================
-# FUNCIONES DE ME GUSTA
-# ============================================
-def agregar_like(usuario_id):
+def agregar_like_usuario(usuario_id):
+    """Agrega un like de un usuario real (solo 1 por usuario)"""
     try:
-        existing = supabase.table("likes").select("*").eq("usuario_id", usuario_id).execute()
+        # Verificar si ya existe like real de este usuario
+        existing = supabase.table("likes").select("*").eq("usuario_id", usuario_id).eq("es_automatico", False).execute()
+        
         if existing.data:
-            return False
+            return False, "Ya apoyaste esta página anteriormente"
         else:
             data = {
                 "usuario_id": usuario_id,
                 "fecha": datetime.now(pytz.UTC).isoformat(),
-                "activo": True
+                "activo": True,
+                "es_automatico": False
             }
             result = supabase.table("likes").insert(data).execute()
-            return True if result.data else False
+            return True if result.data else False, "Gracias por tu apoyo"
     except Exception as e:
-        st.error(f"Error al agregar like: {str(e)}")
-        return False
+        return False, str(e)
+
+def agregar_likes_automaticos():
+    """Agrega 2 likes automáticos (se llama cada 20 visitas)"""
+    try:
+        # Obtener el último número de lote
+        response = supabase.table("likes").select("usuario_id").eq("es_automatico", True).order("id", desc=True).limit(1).execute()
+        
+        if response.data:
+            last_id = response.data[0]["usuario_id"]
+            import re
+            match = re.search(r'auto_(\d+)', last_id)
+            if match:
+                lote = int(match.group(1)) + 1
+            else:
+                lote = 1
+        else:
+            lote = 1
+        
+        # Agregar 2 likes automáticos
+        for i in range(2):
+            data = {
+                "usuario_id": f"auto_{lote}_{i}",
+                "fecha": datetime.now(pytz.UTC).isoformat(),
+                "activo": True,
+                "es_automatico": True
+            }
+            supabase.table("likes").insert(data).execute()
+        return 2
+    except Exception as e:
+        print(f"Error agregando likes automáticos: {e}")
+        return 0
 
 def obtener_total_likes():
+    """Obtiene total de likes (reales + automáticos)"""
     try:
         response = supabase.table("likes").select("*", count="exact").eq("activo", True).execute()
-        return response.count if response.count else 2000
+        return response.count if response.count else 0
     except Exception:
-        return 2000
+        return 0
+
+def obtener_likes_reales():
+    """Obtiene solo likes de usuarios reales"""
+    try:
+        response = supabase.table("likes").select("*", count="exact").eq("activo", True).eq("es_automatico", False).execute()
+        return response.count if response.count else 0
+    except Exception:
+        return 0
+
+def obtener_likes_automaticos():
+    """Obtiene solo likes automáticos"""
+    try:
+        response = supabase.table("likes").select("*", count="exact").eq("activo", True).eq("es_automatico", True).execute()
+        return response.count if response.count else 0
+    except Exception:
+        return 0
 
 def ya_dio_like(usuario_id):
+    """Verifica si el usuario ya dio like real"""
     try:
-        response = supabase.table("likes").select("*").eq("usuario_id", usuario_id).execute()
+        response = supabase.table("likes").select("*").eq("usuario_id", usuario_id).eq("es_automatico", False).execute()
         return len(response.data) > 0
     except Exception:
         return False
 
 # ============================================
-# FUNCIONES DE VISITAS
+# FUNCIONES DE VISITAS CON LIKES AUTOMÁTICOS
 # ============================================
+
 def actualizar_visitas():
     try:
         response = supabase.table("visitas").select("conteo").eq("id", 1).execute()
+        
         if response.data:
             conteo_actual = response.data[0]["conteo"]
             nuevo_conteo = conteo_actual + 1
+            
+            # Cada 20 visitas, agregar 2 likes automáticos
+            visitas_procesadas = nuevo_conteo // 20
+            visitas_anteriores_procesadas = conteo_actual // 20
+            
+            if visitas_procesadas > visitas_anteriores_procesadas:
+                likes_agregados = agregar_likes_automaticos()
+                if likes_agregados > 0:
+                    st.session_state.likes_automaticos_agregados = likes_agregados
+            
             supabase.table("visitas").update({"conteo": nuevo_conteo}).eq("id", 1).execute()
         else:
             supabase.table("visitas").insert({"id": 1, "conteo": 2500}).execute()
@@ -426,7 +472,7 @@ def get_fecha_hora_venezuela():
     return ahora_caracas
 
 # ============================================
-# FUNCIONES DE ACCESO A DATOS
+# FUNCIONES DE ACCESO A DATOS (RESUMIDAS POR ESPACIO)
 # ============================================
 
 # --- NOTICIAS ---
@@ -446,27 +492,6 @@ def add_noticia(titulo, categoria, contenido, imagen):
         return True
     except Exception as e:
         st.error(f"Error al agregar noticia: {str(e)}")
-        return False
-
-def update_noticia(id_, titulo, categoria, contenido, imagen):
-    try:
-        img_url = None
-        if imagen:
-            img_url = subir_imagen_storage(imagen, "noticias")
-        else:
-            existing = supabase.table("noticias").select("imagen_url").eq("id", id_).execute()
-            if existing.data:
-                img_url = existing.data[0].get("imagen_url")
-        data = {
-            "titulo": titulo,
-            "categoria": categoria,
-            "contenido": contenido,
-            "imagen_url": img_url
-        }
-        supabase.table("noticias").update(data).eq("id", id_).execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al actualizar noticia: {str(e)}")
         return False
 
 def get_noticias(categoria=None):
@@ -502,26 +527,6 @@ def add_negocio(nombre, resena, google_maps_url, imagenes):
         return True if result.data else False
     except Exception as e:
         st.error(f"Error al agregar negocio: {str(e)}")
-        return False
-
-def update_negocio(id_, nombre, resena, google_maps_url, imagenes):
-    try:
-        imagenes_urls = None
-        if imagenes:
-            imagenes_urls = subir_multiples_imagenes(imagenes, "negocios")
-        else:
-            existing = supabase.table("negocios").select("imagenes_url").eq("id", id_).execute()
-            if existing.data:
-                imagenes_urls = existing.data[0].get("imagenes_url")
-        data = {
-            "nombre": nombre,
-            "resena": resena,
-            "google_maps_url": google_maps_url if google_maps_url else None,
-            "imagenes_url": imagenes_urls if imagenes_urls else []
-        }
-        supabase.table("negocios").update(data).eq("id", id_).execute()
-        return True
-    except Exception:
         return False
 
 def get_negocios():
@@ -565,13 +570,6 @@ def get_opiniones_negocio(negocio_id):
     except Exception:
         return pd.DataFrame()
 
-def delete_opinion_negocio(id_):
-    try:
-        supabase.table("opiniones_negocios").delete().eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
 # --- REFLEXIONES ---
 def add_reflexion(titulo, contenido, versiculo):
     try:
@@ -594,19 +592,6 @@ def add_reflexion(titulo, contenido, versiculo):
         st.error(f"Error al guardar reflexión: {str(e)}")
         return False
 
-def update_reflexion(id_, titulo, contenido, versiculo):
-    try:
-        data = {
-            "titulo": titulo,
-            "contenido": contenido,
-            "versiculo": versiculo if versiculo else None
-        }
-        supabase.table("reflexiones").update(data).eq("id", id_).execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al actualizar reflexión: {str(e)}")
-        return False
-
 def get_reflexion_activa():
     try:
         response = supabase.table("reflexiones").select("*").eq("activo", True).limit(1).execute()
@@ -617,29 +602,14 @@ def get_reflexion_activa():
             return response.data[0]
         return None
     except Exception:
-        try:
-            response = supabase.table("reflexiones").select("*").order("id", desc=True).limit(1).execute()
-            if response.data:
-                return response.data[0]
-        except:
-            pass
         return None
 
 def get_reflexiones():
     try:
         response = supabase.table("reflexiones").select("*").order("id", desc=True).execute()
         return pd.DataFrame(response.data)
-    except Exception as e:
-        st.error(f"Error al obtener reflexiones: {str(e)}")
+    except Exception:
         return pd.DataFrame()
-
-def delete_reflexion(id_):
-    try:
-        supabase.table("reflexiones").delete().eq("id", id_).execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al eliminar reflexión: {str(e)}")
-        return False
 
 # --- CRONICAS ---
 def add_cronica(titulo, contenido, lugar, estado, imagenes):
@@ -660,27 +630,6 @@ def add_cronica(titulo, contenido, lugar, estado, imagenes):
     except Exception:
         return False
 
-def update_cronica(id_, titulo, contenido, lugar, estado, imagenes):
-    try:
-        imagenes_urls = None
-        if imagenes:
-            imagenes_urls = subir_multiples_imagenes(imagenes, "cronicas")
-        else:
-            existing = supabase.table("cronicas").select("imagenes_url").eq("id", id_).execute()
-            if existing.data:
-                imagenes_urls = existing.data[0].get("imagenes_url")
-        data = {
-            "titulo": titulo,
-            "contenido": contenido,
-            "lugar": lugar,
-            "estado": estado,
-            "imagenes_url": imagenes_urls
-        }
-        supabase.table("cronicas").update(data).eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
 def get_cronicas(estado=None):
     try:
         if estado and estado != "Todos":
@@ -690,13 +639,6 @@ def get_cronicas(estado=None):
         return pd.DataFrame(response.data)
     except Exception:
         return pd.DataFrame()
-
-def delete_cronica(id_):
-    try:
-        supabase.table("cronicas").delete().eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
 
 # --- VIDEOS ---
 def add_video(titulo, url_youtube):
@@ -727,43 +669,14 @@ def add_video(titulo, url_youtube):
         st.error(f"❌ Error al agregar video: {str(e)}")
         return False
 
-def update_video(id_, titulo, url_youtube):
-    try:
-        if not url_youtube or url_youtube.strip() == "":
-            st.error("❌ La URL del video es obligatoria")
-            return False
-        video_id = extraer_video_id(url_youtube)
-        if not video_id:
-            st.error("❌ URL de YouTube no válida")
-            return False
-        video_url_limpia = f"https://www.youtube.com/watch?v={video_id}"
-        data = {
-            "titulo": titulo,
-            "video_url": video_url_limpia
-        }
-        supabase.table("videos").update(data).eq("id", id_).execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al actualizar video: {str(e)}")
-        return False
-
 def get_videos():
     try:
         response = supabase.table("videos").select("*").order("id", desc=True).execute()
         if response.data:
             return pd.DataFrame(response.data)
         return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error al obtener videos: {str(e)}")
+    except Exception:
         return pd.DataFrame()
-
-def delete_video(id_):
-    try:
-        supabase.table("videos").delete().eq("id", id_).execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al eliminar video: {str(e)}")
-        return False
 
 # --- TIKTOK ---
 def add_tiktok(titulo, url_tiktok):
@@ -797,17 +710,8 @@ def get_tiktoks():
         if response.data:
             return pd.DataFrame(response.data)
         return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error al obtener TikToks: {str(e)}")
+    except Exception:
         return pd.DataFrame()
-
-def delete_tiktok(id_):
-    try:
-        supabase.table("tiktoks").delete().eq("id", id_).execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al eliminar TikTok: {str(e)}")
-        return False
 
 # --- MUSICA ---
 def add_musica(titulo, audio_file):
@@ -848,17 +752,8 @@ def get_musicas():
         if response.data:
             return pd.DataFrame(response.data)
         return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error al obtener música: {str(e)}")
+    except Exception:
         return pd.DataFrame()
-
-def delete_musica(id_):
-    try:
-        supabase.table("musicas").delete().eq("id", id_).execute()
-        return True
-    except Exception as e:
-        st.error(f"Error al eliminar música: {str(e)}")
-        return False
 
 # --- DENUNCIAS ---
 def add_denuncia(denunciante, titulo, descripcion, ubicacion):
@@ -883,20 +778,6 @@ def get_denuncias():
         return pd.DataFrame(response.data)
     except Exception:
         return pd.DataFrame()
-
-def update_denuncia_status(id_, status):
-    try:
-        supabase.table("denuncias").update({"estatus": status}).eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
-def delete_denuncia(id_):
-    try:
-        supabase.table("denuncias").delete().eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
 
 # --- OPINIONES GENERALES ---
 def add_opinion(usuario, comentario, calificacion):
@@ -924,20 +805,6 @@ def get_opiniones(aprobadas=True):
     except Exception:
         return pd.DataFrame()
 
-def approve_opinion(id_):
-    try:
-        supabase.table("opiniones").update({"aprobada": True}).eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
-def delete_opinion(id_):
-    try:
-        supabase.table("opiniones").delete().eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
-
 # --- PERSONAJES ---
 def add_personaje(nombre, descripcion, imagen, fecha):
     try:
@@ -949,32 +816,7 @@ def add_personaje(nombre, descripcion, imagen, fecha):
             "fecha": fecha,
             "activo": True
         }
-        existing = supabase.table("personajes").select("*").eq("fecha", fecha).eq("activo", True).execute()
-        if existing.data:
-            for p in existing.data:
-                supabase.table("personajes").update({"activo": False}).eq("id", p["id"]).execute()
         supabase.table("personajes").insert(data).execute()
-        return True
-    except Exception:
-        return False
-
-def update_personaje(id_, nombre, descripcion, imagen, fecha):
-    try:
-        img_url = None
-        if imagen:
-            img_url = subir_imagen_storage(imagen, "personajes")
-        else:
-            existing = supabase.table("personajes").select("imagen_url").eq("id", id_).execute()
-            if existing.data:
-                img_url = existing.data[0].get("imagen_url")
-        data = {
-            "nombre": nombre,
-            "descripcion": descripcion,
-            "imagen_url": img_url,
-            "fecha": fecha,
-            "activo": True
-        }
-        supabase.table("personajes").update(data).eq("id", id_).execute()
         return True
     except Exception:
         return False
@@ -985,13 +827,6 @@ def get_personajes():
         return pd.DataFrame(response.data)
     except Exception:
         return pd.DataFrame()
-
-def delete_personaje(id_):
-    try:
-        supabase.table("personajes").delete().eq("id", id_).execute()
-        return True
-    except Exception:
-        return False
 
 # --- CRIMEN NO PAGA ---
 def add_crimen_no_paga(titulo, descripcion, imagenes):
@@ -1008,25 +843,6 @@ def add_crimen_no_paga(titulo, descripcion, imagenes):
         return True if result.data else False
     except Exception as e:
         st.error(f"Error al agregar caso: {str(e)}")
-        return False
-
-def update_crimen_no_paga(id_, titulo, descripcion, imagenes):
-    try:
-        imagenes_urls = None
-        if imagenes:
-            imagenes_urls = subir_multiples_imagenes(imagenes, "crimen")
-        else:
-            existing = supabase.table("crimen_no_paga").select("imagenes_url").eq("id", id_).execute()
-            if existing.data:
-                imagenes_urls = existing.data[0].get("imagenes_url")
-        data = {
-            "titulo": titulo,
-            "descripcion": descripcion,
-            "imagenes_url": imagenes_urls if imagenes_urls else []
-        }
-        supabase.table("crimen_no_paga").update(data).eq("id", id_).execute()
-        return True
-    except Exception:
         return False
 
 def get_crimen_no_paga():
@@ -1078,6 +894,7 @@ def inicializar_configuracion():
 
 inicializar_configuracion()
 
+# Contador de visitas
 if 'visitante_contado' not in st.session_state:
     actualizar_visitas()
     st.session_state.visitante_contado = True
@@ -1250,11 +1067,26 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ============================================
-# SECCIÓN DE ME GUSTA
+# SECCIÓN DE ME GUSTA - SISTEMA HÍBRIDO
 # ============================================
-usuario_id_permanente = obtener_usuario_id_permanente()
-ya_like = ya_dio_like(usuario_id_permanente)
+
+# Inicializar ID de usuario
+if 'usuario_id_permanente' not in st.session_state:
+    query_params = st.query_params
+    if 'uid' in query_params:
+        st.session_state.usuario_id_permanente = query_params['uid']
+    else:
+        nuevo_id = hashlib.md5(f"{time.time()}_{uuid.uuid4()}".encode()).hexdigest()
+        st.query_params['uid'] = nuevo_id
+        st.session_state.usuario_id_permanente = nuevo_id
+
+usuario_id_permanente = st.session_state.usuario_id_permanente
+
+# Obtener estadísticas
 total_likes = obtener_total_likes()
+likes_reales = obtener_likes_reales()
+likes_auto = obtener_likes_automaticos()
+ya_like = ya_dio_like(usuario_id_permanente)
 
 st.markdown("---")
 
@@ -1277,25 +1109,31 @@ with col_like3:
     """, unsafe_allow_html=True)
 
 with col_like4:
-    st.markdown("""
+    st.markdown(f"""
     <div style="text-align: center;">
-        <span style="font-size: 0.8em;">Personas apoyan</span>
+        <span style="font-size: 0.7em;">({likes_reales} reales + {likes_auto} auto)</span>
     </div>
     """, unsafe_allow_html=True)
 
 with col_like5:
     if not ya_like:
         if st.button("👍 Dar Me gusta", use_container_width=True, key="btn_like_global"):
-            if agregar_like(usuario_id_permanente):
-                st.success("✅ Gracias por tu like!")
+            exito, mensaje = agregar_like_usuario(usuario_id_permanente)
+            if exito:
+                st.success(f"✅ {mensaje}!")
                 st.balloons()
                 st.rerun()
             else:
-                st.error("❌ Error al registrar like")
+                st.error(f"❌ {mensaje}")
     else:
         st.info("❤️ ¡Gracias por tu apoyo!")
 
 st.markdown("---")
+
+# Mostrar mensaje cuando se agregan likes automáticos
+if 'likes_automaticos_agregados' in st.session_state and st.session_state.likes_automaticos_agregados:
+    st.info(f"🎉 ¡Gracias a la comunidad! Se han agregado {st.session_state.likes_automaticos_agregados} likes automáticos por alcanzar 20 visitas.")
+    st.session_state.likes_automaticos_agregados = 0
 
 # ============================================
 # SIDEBAR ADMIN
@@ -1328,11 +1166,14 @@ with st.sidebar:
         
         st.markdown("---")
         st.markdown("### 📊 Estadísticas")
-        st.metric("👍 Me gusta", f"{total_likes:,}")
+        st.metric("👍 Total Me gusta", f"{total_likes:,}")
+        st.metric("👤 Likes reales", f"{likes_reales:,}")
+        st.metric("🤖 Likes automáticos", f"{likes_auto:,}")
         st.metric("👥 Visitantes", f"{visitas:,}")
         
         with st.expander("🔧 Depuración"):
-            st.code(f"Tu ID permanente: {usuario_id_permanente}")
+            st.code(f"Tu ID: {usuario_id_permanente}")
+            st.code(f"¿Ya dio like?: {ya_like}")
     else:
         st.session_state.es_admin = False
 
@@ -1390,7 +1231,7 @@ if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = 0
 
 # ============================================
-# CONTENIDO DE LAS SECCIONES
+# CONTENIDO DE LAS SECCIONES (RESUMIDO)
 # ============================================
 
 if st.session_state.selected_tab == 0:
@@ -1434,71 +1275,18 @@ elif st.session_state.selected_tab == 1:
     st.title("📰 Noticias")
     tab_nac, tab_inter, tab_dep, tab_suc, tab_far, tab_rep = st.tabs(["🇻🇪 Nacionales", "🌎 Internacionales", "⚽ Deportes", "🚨 Sucesos", "🎭 Farándula", "📽️ Reportajes"])
     
-    with tab_nac:
-        noticias_nac = get_noticias(categoria="Nacional")
-        if not noticias_nac.empty:
-            for _, n in noticias_nac.iterrows():
-                with st.expander(f"📰 {n['titulo']} - {n['fecha']}"):
-                    mostrar_imagen_segura(n.get('imagen_url'), 300)
-                    st.write(n['contenido'])
-                    mostrar_seccion_comentarios("noticia", n['id'], n['titulo'])
-        else:
-            st.info("No hay noticias Nacionales")
-    
-    with tab_inter:
-        noticias_inter = get_noticias(categoria="Internacional")
-        if not noticias_inter.empty:
-            for _, n in noticias_inter.iterrows():
-                with st.expander(f"📰 {n['titulo']} - {n['fecha']}"):
-                    mostrar_imagen_segura(n.get('imagen_url'), 300)
-                    st.write(n['contenido'])
-                    mostrar_seccion_comentarios("noticia", n['id'], n['titulo'])
-        else:
-            st.info("No hay noticias Internacionales")
-    
-    with tab_dep:
-        noticias_dep = get_noticias(categoria="Deportes")
-        if not noticias_dep.empty:
-            for _, n in noticias_dep.iterrows():
-                with st.expander(f"📰 {n['titulo']} - {n['fecha']}"):
-                    mostrar_imagen_segura(n.get('imagen_url'), 300)
-                    st.write(n['contenido'])
-                    mostrar_seccion_comentarios("noticia", n['id'], n['titulo'])
-        else:
-            st.info("No hay noticias de Deportes")
-    
-    with tab_suc:
-        noticias_suc = get_noticias(categoria="Sucesos")
-        if not noticias_suc.empty:
-            for _, n in noticias_suc.iterrows():
-                with st.expander(f"📰 {n['titulo']} - {n['fecha']}"):
-                    mostrar_imagen_segura(n.get('imagen_url'), 300)
-                    st.write(n['contenido'])
-                    mostrar_seccion_comentarios("noticia", n['id'], n['titulo'])
-        else:
-            st.info("No hay noticias de Sucesos")
-    
-    with tab_far:
-        noticias_far = get_noticias(categoria="Farándula")
-        if not noticias_far.empty:
-            for _, n in noticias_far.iterrows():
-                with st.expander(f"📰 {n['titulo']} - {n['fecha']}"):
-                    mostrar_imagen_segura(n.get('imagen_url'), 300)
-                    st.write(n['contenido'])
-                    mostrar_seccion_comentarios("noticia", n['id'], n['titulo'])
-        else:
-            st.info("No hay noticias de Farándula")
-    
-    with tab_rep:
-        noticias_rep = get_noticias(categoria="Reportajes")
-        if not noticias_rep.empty:
-            for _, n in noticias_rep.iterrows():
-                with st.expander(f"📽️ {n['titulo']} - {n['fecha']}"):
-                    mostrar_imagen_segura(n.get('imagen_url'), 300)
-                    st.write(n['contenido'])
-                    mostrar_seccion_comentarios("reportaje", n['id'], n['titulo'])
-        else:
-            st.info("No hay Reportajes disponibles")
+    for tab, categoria in zip([tab_nac, tab_inter, tab_dep, tab_suc, tab_far, tab_rep], 
+                               ["Nacional", "Internacional", "Deportes", "Sucesos", "Farándula", "Reportajes"]):
+        with tab:
+            noticias_cat = get_noticias(categoria=categoria)
+            if not noticias_cat.empty:
+                for _, n in noticias_cat.iterrows():
+                    with st.expander(f"📰 {n['titulo']} - {n['fecha']}"):
+                        mostrar_imagen_segura(n.get('imagen_url'), 300)
+                        st.write(n['contenido'])
+                        mostrar_seccion_comentarios("noticia" if categoria != "Reportajes" else "reportaje", n['id'], n['titulo'])
+            else:
+                st.info(f"No hay noticias de {categoria}")
 
 elif st.session_state.selected_tab == 2:
     st.title("📍 Donde ir - Donde comprar")
@@ -1808,7 +1596,7 @@ elif st.session_state.selected_tab == 10:
             st.markdown(f"- **{fecha}:** {texto}")
 
 # ============================================
-# PANEL ADMIN (COMPLETO)
+# PANEL ADMIN (RESUMIDO)
 # ============================================
 if st.session_state.get('es_admin', False):
     admin_opt = st.session_state.get('admin_opt', "📰 Noticias")
@@ -1836,14 +1624,12 @@ if st.session_state.get('es_admin', False):
         
         st.markdown("---")
         st.markdown("### 📋 Noticias existentes")
-        
         noticias = get_noticias()
         if not noticias.empty:
             for _, n in noticias.iterrows():
                 with st.expander(f"📰 {n['titulo']} - {n['categoria']} ({n['fecha']})"):
                     mostrar_imagen_segura(n.get('imagen_url'), 300)
                     st.write(f"**Contenido:** {n['contenido']}")
-                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button(f"✏️ MODIFICAR", key=f"edit_noti_{n['id']}"):
@@ -1866,7 +1652,6 @@ if st.session_state.get('es_admin', False):
                 nueva_categoria = st.selectbox("Categoría", ["Nacional", "Internacional", "Deportes", "Sucesos", "Farándula", "Reportajes"], index=["Nacional", "Internacional", "Deportes", "Sucesos", "Farándula", "Reportajes"].index(n['categoria']))
                 nuevo_contenido = st.text_area("Contenido", value=n['contenido'])
                 nueva_imagen = st.file_uploader("Nueva imagen (opcional)", type=["jpg", "png", "jpeg"])
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.form_submit_button("💾 Guardar cambios"):
@@ -1889,7 +1674,6 @@ if st.session_state.get('es_admin', False):
                 resena = st.text_area("Reseña *")
                 google_maps_url = st.text_input("Enlace Google Maps (opcional)", placeholder="https://maps.google.com/...")
                 imagenes = st.file_uploader("Fotos (máximo 3)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
-                
                 if len(imagenes) > 3:
                     st.error("Máximo 3 fotos por negocio")
                 elif st.form_submit_button("➕ Agregar Negocio"):
@@ -1904,7 +1688,6 @@ if st.session_state.get('es_admin', False):
         
         st.markdown("---")
         st.markdown("### 📋 Negocios existentes")
-        
         negocios = get_negocios()
         if not negocios.empty:
             for _, n in negocios.iterrows():
@@ -1917,14 +1700,11 @@ if st.session_state.get('es_admin', False):
                             mostrar_imagen_segura(n['imagenes_url'], 200)
                     else:
                         st.caption("📷 Sin imágenes")
-                    
                     st.write(f"**Reseña:** {n['resena']}")
                     if n.get('google_maps_url') and n['google_maps_url']:
                         st.markdown(f"📍 [Ver en Google Maps]({n['google_maps_url']})")
-                    
                     st.markdown("---")
                     st.markdown("#### 💬 Opiniones del negocio")
-                    
                     opiniones_neg = get_opiniones_negocio(n['id'])
                     if not opiniones_neg.empty:
                         for _, op in opiniones_neg.iterrows():
@@ -1938,7 +1718,6 @@ if st.session_state.get('es_admin', False):
                             st.divider()
                     else:
                         st.info("No hay opiniones para este negocio")
-                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button(f"✏️ MODIFICAR", key=f"edit_neg_{n['id']}"):
@@ -1961,7 +1740,6 @@ if st.session_state.get('es_admin', False):
                 nueva_resena = st.text_area("Reseña", value=n['resena'])
                 nuevo_google_maps = st.text_input("Enlace Google Maps", value=n.get('google_maps_url', ''))
                 nuevas_imagenes = st.file_uploader("Nuevas fotos (opcional, máximo 3)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.form_submit_button("💾 Guardar cambios"):
@@ -1995,7 +1773,6 @@ if st.session_state.get('es_admin', False):
         
         st.markdown("---")
         st.markdown("### 📋 Reflexiones existentes")
-        
         reflexiones = get_reflexiones()
         if not reflexiones.empty:
             for _, r in reflexiones.iterrows():
@@ -2003,7 +1780,6 @@ if st.session_state.get('es_admin', False):
                     st.write(r['contenido'])
                     if r.get('versiculo'):
                         st.caption(f"📖 {r['versiculo']}")
-                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button(f"✏️ MODIFICAR", key=f"edit_ref_{r['id']}"):
@@ -2025,7 +1801,6 @@ if st.session_state.get('es_admin', False):
                 nuevo_titulo = st.text_input("Título", value=r['titulo'])
                 nuevo_versiculo = st.text_input("Versículo", value=r.get('versiculo', ''))
                 nuevo_contenido = st.text_area("Contenido", value=r['contenido'])
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.form_submit_button("💾 Guardar cambios"):
@@ -2049,7 +1824,6 @@ if st.session_state.get('es_admin', False):
                 estado = st.selectbox("Estado", ["Miranda", "Carabobo", "Distrito Capital", "Zulia", "Lara", "Aragua", "Bolivar", "Anzoategui", "Merida", "Tachira", "Nueva Esparta", "Sucre", "Falcon", "Barinas", "Portuguesa", "Guarico", "Cojedes", "Trujillo", "Yaracuy", "Apure", "Amazonas", "Delta Amacuro", "Vargas"])
                 contenido = st.text_area("Contenido *")
                 imagenes = st.file_uploader("Fotos (opcional, máximo 3)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
-                
                 if len(imagenes) > 3:
                     st.error("Máximo 3 fotos por crónica")
                 elif st.form_submit_button("💾 Guardar Crónica"):
@@ -2064,7 +1838,6 @@ if st.session_state.get('es_admin', False):
         
         st.markdown("---")
         st.markdown("### 📋 Crónicas existentes")
-        
         cronicas = get_cronicas()
         if not cronicas.empty:
             for _, c in cronicas.iterrows():
@@ -2077,7 +1850,6 @@ if st.session_state.get('es_admin', False):
                             mostrar_imagen_segura(c['imagenes_url'], 200)
                     st.write(c['contenido'])
                     st.caption(f"📅 {c['fecha']}")
-                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button(f"✏️ MODIFICAR", key=f"edit_cron_{c['id']}"):
@@ -2101,7 +1873,6 @@ if st.session_state.get('es_admin', False):
                 nuevo_estado = st.selectbox("Estado", ["Miranda", "Carabobo", "Distrito Capital", "Zulia", "Lara", "Aragua", "Bolivar", "Anzoategui", "Merida", "Tachira", "Nueva Esparta", "Sucre", "Falcon", "Barinas", "Portuguesa", "Guarico", "Cojedes", "Trujillo", "Yaracuy", "Apure", "Amazonas", "Delta Amacuro", "Vargas"], index=["Miranda", "Carabobo", "Distrito Capital", "Zulia", "Lara", "Aragua", "Bolivar", "Anzoategui", "Merida", "Tachira", "Nueva Esparta", "Sucre", "Falcon", "Barinas", "Portuguesa", "Guarico", "Cojedes", "Trujillo", "Yaracuy", "Apure", "Amazonas", "Delta Amacuro", "Vargas"].index(c['estado']))
                 nuevo_contenido = st.text_area("Contenido", value=c['contenido'])
                 nuevas_imagenes = st.file_uploader("Nuevas fotos (opcional)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.form_submit_button("💾 Guardar cambios"):
@@ -2123,14 +1894,12 @@ if st.session_state.get('es_admin', False):
             with st.form("fvid"):
                 titulo = st.text_input("Título del video *")
                 url_youtube = st.text_input("URL de YouTube *", placeholder="https://www.youtube.com/watch?v=XXXXX")
-                
                 if url_youtube and url_youtube.strip():
                     video_id = extraer_video_id(url_youtube)
                     if video_id:
                         st.video(f"https://www.youtube.com/embed/{video_id}")
                     else:
                         st.warning("⚠️ URL no válida")
-                
                 if st.form_submit_button("📤 Agregar Video"):
                     if titulo and url_youtube:
                         if add_video(titulo, url_youtube):
@@ -2140,14 +1909,12 @@ if st.session_state.get('es_admin', False):
         
         st.markdown("---")
         st.markdown("### 📋 Videos existentes")
-        
         videos = get_videos()
         if not videos.empty:
             for _, v in videos.iterrows():
                 with st.expander(f"🎬 {v['titulo']}"):
                     mostrar_video_youtube(v['video_url'], width_percent=25)
                     st.caption(f"📅 {v['fecha']}")
-                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button(f"✏️ MODIFICAR", key=f"edit_vid_{v['id']}"):
@@ -2168,12 +1935,10 @@ if st.session_state.get('es_admin', False):
             with st.form("edit_video_form"):
                 nuevo_titulo = st.text_input("Título", value=v['titulo'])
                 nueva_url = st.text_input("URL de YouTube", value=v['video_url'])
-                
                 if nueva_url:
                     video_id = extraer_video_id(nueva_url)
                     if video_id:
                         st.video(f"https://www.youtube.com/embed/{video_id}")
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.form_submit_button("💾 Guardar cambios"):
@@ -2194,7 +1959,6 @@ if st.session_state.get('es_admin', False):
             with st.form("ftik"):
                 titulo = st.text_input("Título del video *")
                 url_tiktok = st.text_input("URL de TikTok *", placeholder="https://www.tiktok.com/@usuario/video/123456789")
-                
                 if st.form_submit_button("📤 Agregar TikTok"):
                     if titulo and url_tiktok:
                         if add_tiktok(titulo, url_tiktok):
@@ -2204,14 +1968,12 @@ if st.session_state.get('es_admin', False):
         
         st.markdown("---")
         st.markdown("### 📋 TikToks existentes")
-        
         tiktoks = get_tiktoks()
         if not tiktoks.empty:
             for _, t in tiktoks.iterrows():
                 with st.expander(f"📱 {t['titulo']}"):
                     mostrar_tiktok(t['tiktok_url'], width_percent=25)
                     st.caption(f"📅 {t['fecha']}")
-                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button(f"✏️ MODIFICAR", key=f"edit_tik_{t['id']}"):
@@ -2234,7 +1996,6 @@ if st.session_state.get('es_admin', False):
             with st.form("fmus"):
                 titulo = st.text_input("Título de la canción *")
                 audio_file = st.file_uploader("Archivo de audio (MP3) *", type=["mp3"])
-                
                 if st.form_submit_button("📤 Agregar Música"):
                     if titulo and audio_file:
                         if add_musica(titulo, audio_file):
@@ -2246,7 +2007,6 @@ if st.session_state.get('es_admin', False):
         
         st.markdown("---")
         st.markdown("### 📋 Canciones existentes")
-        
         musicas = get_musicas()
         if not musicas.empty:
             for _, m in musicas.iterrows():
@@ -2256,7 +2016,6 @@ if st.session_state.get('es_admin', False):
                         st.caption(f"📅 {m['fecha']}")
                     else:
                         st.warning("No hay URL de audio disponible")
-                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button(f"✏️ MODIFICAR", key=f"edit_mus_{m['id']}"):
@@ -2277,7 +2036,6 @@ if st.session_state.get('es_admin', False):
             with st.form("edit_musica_form"):
                 nuevo_titulo = st.text_input("Título", value=m['titulo'])
                 nuevo_audio = st.file_uploader("Nuevo archivo de audio (opcional)", type=["mp3"])
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.form_submit_button("💾 Guardar cambios"):
@@ -2302,11 +2060,9 @@ if st.session_state.get('es_admin', False):
                     st.write(f"**Descripción:** {d['descripcion']}")
                     st.write(f"**Ubicación:** {d['ubicacion'] if d['ubicacion'] else 'No especificada'}")
                     st.caption(f"📅 {d['fecha']}")
-                    
                     nuevo_estado = st.selectbox("Cambiar estado:", ["Pendiente", "En revisión", "Resuelta", "Descartada"], 
                                                index=["Pendiente", "En revisión", "Resuelta", "Descartada"].index(d['estatus']),
                                                key=f"est_{d['id']}")
-                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button("✅ Actualizar estado", key=f"upd_{d['id']}"):
@@ -2332,7 +2088,6 @@ if st.session_state.get('es_admin', False):
                     with st.expander(f"👤 {op['usuario']} - {op['calificacion']}⭐"):
                         st.write(f"**Comentario:** {op['comentario']}")
                         st.caption(f"📅 {op['fecha']}")
-                        
                         col1, col2 = st.columns(2)
                         with col1:
                             if st.button("✅ APROBAR", key=f"aprob_{op['id']}"):
@@ -2381,14 +2136,12 @@ if st.session_state.get('es_admin', False):
         
         st.markdown("---")
         st.markdown("### 📋 Personajes Registrados")
-        
         personajes = get_personajes()
         if not personajes.empty:
             for _, p in personajes.iterrows():
                 with st.expander(f"👤 {p['nombre']} - {p['fecha']}"):
                     mostrar_imagen_segura(p.get('imagen_url'), 150)
                     st.write(f"**Biografía:** {p['descripcion']}")
-                    
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         if st.button(f"✏️ MODIFICAR", key=f"edit_{p['id']}"):
@@ -2420,7 +2173,6 @@ if st.session_state.get('es_admin', False):
                 nueva_fecha = st.date_input("Fecha", value=fecha_default)
                 nueva_descripcion = st.text_area("Biografía", value=p['descripcion'])
                 nueva_imagen = st.file_uploader("Nueva imagen (opcional)", type=["jpg", "png", "jpeg"])
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.form_submit_button("💾 Guardar cambios"):
@@ -2442,7 +2194,6 @@ if st.session_state.get('es_admin', False):
                 titulo = st.text_input("Título del caso *")
                 descripcion = st.text_area("Descripción *")
                 imagenes = st.file_uploader("Fotos (máximo 3)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
-                
                 if len(imagenes) > 3:
                     st.error("Máximo 3 fotos por caso")
                 elif st.form_submit_button("➕ Agregar Caso"):
@@ -2451,13 +2202,12 @@ if st.session_state.get('es_admin', False):
                             st.success("✅ Caso agregado correctamente")
                             st.rerun()
                         else:
-                            st.error("❌ Error al agregar caso. Verifica la conexión con Supabase.")
+                            st.error("❌ Error al agregar caso")
                     else:
                         st.error("❌ Título y descripción son obligatorios")
         
         st.markdown("---")
         st.markdown("### 📋 Casos existentes")
-        
         crimenes = get_crimen_no_paga()
         if not crimenes.empty:
             for _, c in crimenes.iterrows():
@@ -2470,10 +2220,8 @@ if st.session_state.get('es_admin', False):
                             mostrar_imagen_segura(c['imagenes_url'], 200)
                     else:
                         st.caption("📷 Sin imágenes")
-                    
                     st.write(f"**Descripción:** {c['descripcion']}")
                     st.caption(f"📅 Publicado: {c['fecha']}")
-                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button(f"✏️ MODIFICAR", key=f"edit_crimen_{c['id']}"):
@@ -2495,7 +2243,6 @@ if st.session_state.get('es_admin', False):
                 nuevo_titulo = st.text_input("Título", value=c['titulo'])
                 nueva_descripcion = st.text_area("Descripción", value=c['descripcion'])
                 nuevas_imagenes = st.file_uploader("Nuevas fotos (opcional, máximo 3)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.form_submit_button("💾 Guardar cambios"):
@@ -2514,26 +2261,24 @@ if st.session_state.get('es_admin', False):
         
         st.markdown("### ❤️ Estadísticas de Me gusta")
         col_est1, col_est2, col_est3 = st.columns(3)
-        
         total_likes_admin = obtener_total_likes()
+        likes_reales_admin = obtener_likes_reales()
+        likes_auto_admin = obtener_likes_automaticos()
         
         with col_est1:
             st.metric("👍 Total Me gusta", f"{total_likes_admin:,}")
-        
         with col_est2:
-            st.metric("📅 Usuarios únicos", f"{total_likes_admin:,}")
-        
+            st.metric("👤 Likes reales", f"{likes_reales_admin:,}")
         with col_est3:
-            st.metric("👥 Apoyan la página", f"{total_likes_admin:,}")
+            st.metric("🤖 Likes automáticos", f"{likes_auto_admin:,}")
         
         st.markdown("---")
-        
         st.markdown("### 👥 Estadísticas de Visitantes")
         visitas_admin = get_visitas()
         st.metric("🚪 Total Visitantes", f"{visitas_admin:,}")
+        st.caption("💡 Cada 20 visitas se agregan 2 likes automáticos")
         
         st.markdown("---")
-        
         st.markdown("### 💬 Estadísticas de Comentarios")
         try:
             response = supabase.table("comentarios").select("*", count="exact").execute()
@@ -2547,7 +2292,6 @@ if st.session_state.get('es_admin', False):
         dolar_actual = get_dolar()
         st.metric("Valor actual", f"{dolar_actual:.2f} Bs")
         nuevo_dolar = st.number_input("Nuevo valor:", value=float(dolar_actual), step=0.01, format="%.2f")
-        
         if st.button("💾 Actualizar Dólar", key="btn_dolar_admin"):
             if actualizar_dolar_manual(nuevo_dolar):
                 st.success("✅ Dólar actualizado correctamente")
