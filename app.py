@@ -2927,9 +2927,7 @@ else:
 
 st.markdown("---")
 
-if 'likes_automaticos_agregados' in st.session_state and st.session_state.likes_automaticos_agregados:
-    st.info(f"🎉 ¡Gracias a la comunidad! Se han agregado {st.session_state.likes_automaticos_agregados} likes automáticos.")
-    st.session_state.likes_automaticos_agregados = 0
+# Sección "Gracias a la comunidad" eliminada
 
 mostrar_panel_notificaciones()
 st.markdown("---")
