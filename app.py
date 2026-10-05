@@ -2550,15 +2550,18 @@ def notificar_nuevo_producto(nombre, id_producto):
     link = f"?tab=11&producto={id_producto}"
     agregar_notificacion("publicacion", mensaje, link)
 
-def mostrar_panel_notificaciones():
-    notificaciones = obtener_notificaciones()
+notificaciones = obtener_notificaciones()
     no_leidas = contar_notificaciones_no_leidas()
     
-    col1, col2, col3 = st.columns([1, 3, 1])
-    with col2:
-        icono = "🔔" if no_leidas == 0 else f"🔔 {no_leidas} ✨"
-        if st.button(icono, key="btn_notificaciones", help="Ver notificaciones", use_container_width=True):
-            st.session_state.mostrar_notificaciones = not st.session_state.get('mostrar_notificaciones', False)
+    if st.session_state.get('es_admin', False):
+        col1, col2, col3 = st.columns([1, 3, 1])
+        with col2:
+            icono = "🔔" if no_leidas == 0 else f"🔔 {no_leidas} ✨"
+            if st.button(icono, key="btn_notificaciones", help="Ver notificaciones", use_container_width=True):
+                st.session_state.mostrar_notificaciones = not st.session_state.get('mostrar_notificaciones', False)
+                st.rerun()
+    
+    if st.session_state.get('mostrar_notificaciones', False):
             st.rerun()
     
     if st.session_state.get('mostrar_notificaciones', False):
@@ -2644,6 +2647,13 @@ footer {visibility: hidden !important;}
 .stDeployButton {display: none !important;}
 header {visibility: hidden !important;}
 [data-testid="stToolbar"] {display: none !important;}
+[data-testid="stStatusWidget"] {display: none !important;}
+.stAppDeployButton {display: none !important;}
+[data-testid="manage-app-button"] {display: none !important;}
+button[kind="header"] {display: none !important;}
+[class*="viewerBadge"] {display: none !important;}
+[class*="ViewerBadge"] {display: none !important;}
+[class*="manageApp"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
