@@ -2602,11 +2602,37 @@ if 'visitante_contado' not in st.session_state:
 # ============================================
 st.markdown(f"""
 <style>
-.stApp {{
-    background: linear-gradient(rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0.75)), url('{FONDO_URL}') !important;
+/* Fondo principal - aplicado a múltiples contenedores para evitar que desaparezca */
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] > .main,
+[data-testid="stHeader"],
+[data-testid="stBottom"],
+body,
+html {{
+    background-image: linear-gradient(rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0.75)), url('{FONDO_URL}') !important;
     background-size: cover !important;
-    background-position: center !important;
+    background-position: center center !important;
+    background-repeat: no-repeat !important;
     background-attachment: fixed !important;
+    background-color: #000000 !important;
+    min-height: 100vh !important;
+}}
+
+/* Contenedores internos transparentes para que se vea el fondo */
+[data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"],
+[data-testid="stBlock"],
+section.main,
+.block-container > div {{
+    background: transparent !important;
+}}
+
+/* El bloque principal del contenido mantiene su semitransparencia */
+.block-container {{
+    background-color: rgba(0, 0, 0, 0.85) !important;
+    border-radius: 20px !important;
+    padding: 20px !important;
 }}
 .block-container {{
     background-color: rgba(0, 0, 0, 0.85) !important;
