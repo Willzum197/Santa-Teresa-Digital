@@ -2940,77 +2940,9 @@ st.markdown("---")
 
 # Sección "Gracias a la comunidad" eliminada
 
+
 def mostrar_panel_notificaciones():
-    notificaciones = obtener_notificaciones()
-    no_leidas = contar_notificaciones_no_leidas()
-
-    if st.session_state.get('es_admin', False):
-        col1, col2, col3 = st.columns([1, 3, 1])
-        with col2:
-            icono = "🔔" if no_leidas == 0 else f"🔔 {no_leidas} ✨"
-            if st.button(icono, key="btn_notificaciones", help="Ver notificaciones", use_container_width=True):
-                st.session_state.mostrar_notificaciones = not st.session_state.get('mostrar_notificaciones', False)
-                st.rerun()
-
-    if st.session_state.get('mostrar_notificaciones', False):
-        st.markdown("---")
-        st.markdown("### 📬 Centro de Notificaciones")
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("✅ Marcar todas como leídas", use_container_width=True):
-                if marcar_todas_como_leidas():
-                    st.success("Todas las notificaciones marcadas como leídas")
-                    st.rerun()
-        with col2:
-            if st.button("🔄 Actualizar", use_container_width=True):
-                st.rerun()
-        with col3:
-            if st.button("❌ Cerrar", use_container_width=True):
-                st.session_state.mostrar_notificaciones = False
-                st.rerun()
-
-        if not notificaciones.empty:
-            for idx, notif in notificaciones.iterrows():
-                with st.container():
-                    if notif['tipo'] == 'noticia':
-                        emoji = "📰"
-                    elif notif['tipo'] == 'comentario':
-                        emoji = "💬"
-                    elif notif['tipo'] == 'dolar':
-                        emoji = "💵"
-                    elif notif['tipo'] == 'publicacion':
-                        emoji = "🛍️"
-                    elif notif['tipo'] == 'bienvenida':
-                        emoji = "🎉"
-                    else:
-                        emoji = "📌"
-
-                    if notif['leida']:
-                        bg_color = "rgba(255,255,255,0.05)"
-                    else:
-                        bg_color = "rgba(255,215,0,0.15)"
-
-                    st.markdown(f"""
-                    <div style="background: {bg_color}; border-left: 4px solid #FFD700; padding: 10px; border-radius: 5px; margin: 5px 0;">
-                        <div style="display: flex; justify-content: space-between;">
-                            <span><strong>{emoji} {notif['mensaje']}</strong></span>
-                            <span style="font-size: 0.8em; color: #aaa;">{notif['fecha']}</span>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    if not notif['leida']:
-                        if st.button(f"Marcar como leída", key=f"marcar_{notif['id']}_{idx}"):
-                            if marcar_notificacion_como_leida(notif['id']):
-                                st.rerun()
-
-                    if notif.get('link'):
-                        st.markdown(f"🔗 [Ver más]({notif['link']})")
-
-                    st.divider()
-        else:
-            st.info("📭 No hay notificaciones")
+    pass    
 
 # ============================================
 # SIDEBAR ADMIN
