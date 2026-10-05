@@ -2566,6 +2566,20 @@ footer {visibility: hidden !important;}
 .stDeployButton {display: none !important;}
 header {visibility: hidden !important;}
 [data-testid="stToolbar"] {display: none !important;}
+[data-testid="stStatusWidget"] {display: none !important;}
+[data-testid="stDecoration"] {display: none !important;}
+.stAppDeployButton {display: none !important;}
+.stActionButton {display: none !important;}
+[data-testid="manage-app-button"] {display: none !important;}
+[class*="viewerBadge"] {display: none !important;}
+[class*="ViewerBadge"] {display: none !important;}
+[class*="manageApp"] {display: none !important;}
+[class*="MainMenu"] {display: none !important;}
+iframe[title="streamlit_app"] {display: none !important;}
+a[href*="streamlit.io"] {display: none !important;}
+.css-1lsmgbg {display: none !important;}
+.css-1v8aw99 {display: none !important;}
+button[title="View fullscreen"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
