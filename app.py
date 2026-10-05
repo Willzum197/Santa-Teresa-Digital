@@ -2550,8 +2550,8 @@ def notificar_nuevo_producto(nombre, id_producto):
     link = f"?tab=11&producto={id_producto}"
     agregar_notificacion("publicacion", mensaje, link)
 
-notificaciones = obtener_notificaciones()
-no_leidas = contar_notificaciones_no_leidas()   
+    notificaciones = obtener_notificaciones()
+    no_leidas = contar_notificaciones_no_leidas()   
     
     if st.session_state.get('es_admin', False):
         if st.session_state.get('es_admin', False):
