@@ -2554,6 +2554,7 @@ notificaciones = obtener_notificaciones()
     no_leidas = contar_notificaciones_no_leidas()
     
     if st.session_state.get('es_admin', False):
+        if st.session_state.get('es_admin', False):
         col1, col2, col3 = st.columns([1, 3, 1])
         with col2:
             icono = "🔔" if no_leidas == 0 else f"🔔 {no_leidas} ✨"
