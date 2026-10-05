@@ -1,3 +1,4 @@
+aplicación.py
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -1488,84 +1489,6 @@ DIRECTORIO_SALUD = [
 ]
 
 # ============================================
-# FUNCIÓN DE CHATBOT PARA PREGUNTA AL DOCTOR
-# ============================================
-def responder_pregunta_medica(pregunta):
-    pregunta_lower = pregunta.lower()
-    
-    if any(word in pregunta_lower for word in ["dolor de cabeza", "migraña", "cefalea"]):
-        return """
-        **Posible diagnóstico:** Cefalea o Migraña
-        
-        **Recomendación:**
-        - Descansa en un lugar tranquilo y oscuro
-        - Aplica compresas frías en la frente
-        - Mantente hidratado
-        - Si el dolor es intenso o recurrente, consulta a un neurólogo
-        
-        ⚠️ **Recuerda:** Esta es solo una guía informativa.
-        """
-    elif any(word in pregunta_lower for word in ["dolor de garganta", "garganta"]):
-        return """
-        **Posible diagnóstico:** Faringitis o Amigdalitis
-        
-        **Recomendación:**
-        - Haz gárgaras con agua tibia y sal
-        - Bebe líquidos calientes
-        - Descansa la voz
-        - Si hay fiebre o dura más de 3 días, consulta a un médico
-        
-        ⚠️ **Recuerda:** Esta es solo una guía informativa.
-        """
-    elif any(word in pregunta_lower for word in ["fiebre", "temperatura"]):
-        return """
-        **Posible diagnóstico:** Infección viral o bacteriana
-        
-        **Recomendación:**
-        - Reposo absoluto
-        - Bebe abundantes líquidos
-        - Toma paracetamol para bajar la fiebre
-        - Si la fiebre supera los 38.5°C o dura más de 3 días, consulta a un médico
-        
-        ⚠️ **Recuerda:** Esta es solo una guía informativa.
-        """
-    elif any(word in pregunta_lower for word in ["dolor en el pecho", "pecho"]):
-        return """
-        ⚠️ **ATENCIÓN URGENTE**
-        
-        **Posible diagnóstico:** Problema cardíaco
-        
-        **Recomendación:**
-        - **ACUDE A URGENCIAS INMEDIATAMENTE O LLAMA AL 911**
-        - Reposo absoluto
-        - No te automediques
-        
-        ⚠️ **Recuerda:** ACUDE AL MÉDICO URGENTEMENTE.
-        """
-    elif any(word in pregunta_lower for word in ["dificultad para respirar", "respirar"]):
-        return """
-        ⚠️ **ATENCIÓN URGENTE**
-        
-        **Posible diagnóstico:** Problema respiratorio
-        
-        **Recomendación:**
-        - **ACUDE A URGENCIAS INMEDIATAMENTE O LLAMA AL 911**
-        - Siéntate en posición recta
-        - Mantén la calma
-        
-        ⚠️ **Recuerda:** ACUDE AL MÉDICO URGENTEMENTE.
-        """
-    else:
-        return """
-        **Análisis preliminar:**
-        
-        Consulta a un médico para una evaluación completa.
-        
-        ⚠️ **Recuerda:** Esta es solo una guía informativa.
-        """
-
-# ============================================
-
 # FUNCIÓN DE DIAGNÓSTICO
 # ============================================
 def diagnosticar_enfermedades(sintomas_usuario, condiciones_preexistentes, edad, sexo):
@@ -2550,19 +2473,15 @@ def notificar_nuevo_producto(nombre, id_producto):
     link = f"?tab=11&producto={id_producto}"
     agregar_notificacion("publicacion", mensaje, link)
 
+def mostrar_panel_notificaciones():
     notificaciones = obtener_notificaciones()
-    no_leidas = contar_notificaciones_no_leidas()   
+    no_leidas = contar_notificaciones_no_leidas()
     
-    if st.session_state.get('es_admin', False):
-        if st.session_state.get('es_admin', False):
-        col1, col2, col3 = st.columns([1, 3, 1])
-        with col2:
-            icono = "🔔" if no_leidas == 0 else f"🔔 {no_leidas} ✨"
-            if st.button(icono, key="btn_notificaciones", help="Ver notificaciones", use_container_width=True):
-                st.session_state.mostrar_notificaciones = not st.session_state.get('mostrar_notificaciones', False)
-                st.rerun()
-    
-    if st.session_state.get('mostrar_notificaciones', False):
+    col1, col2, col3 = st.columns([1, 3, 1])
+    with col2:
+        icono = "🔔" if no_leidas == 0 else f"🔔 {no_leidas} ✨"
+        if st.button(icono, key="btn_notificaciones", help="Ver notificaciones", use_container_width=True):
+            st.session_state.mostrar_notificaciones = not st.session_state.get('mostrar_notificaciones', False)
             st.rerun()
     
     if st.session_state.get('mostrar_notificaciones', False):
@@ -2648,13 +2567,6 @@ footer {visibility: hidden !important;}
 .stDeployButton {display: none !important;}
 header {visibility: hidden !important;}
 [data-testid="stToolbar"] {display: none !important;}
-[data-testid="stStatusWidget"] {display: none !important;}
-.stAppDeployButton {display: none !important;}
-[data-testid="manage-app-button"] {display: none !important;}
-button[kind="header"] {display: none !important;}
-[class*="viewerBadge"] {display: none !important;}
-[class*="ViewerBadge"] {display: none !important;}
-[class*="manageApp"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -2938,11 +2850,12 @@ else:
 
 st.markdown("---")
 
-# Sección "Gracias a la comunidad" eliminada
+if 'likes_automaticos_agregados' in st.session_state and st.session_state.likes_automaticos_agregados:
+    st.info(f"🎉 ¡Gracias a la comunidad! Se han agregado {st.session_state.likes_automaticos_agregados} likes automáticos.")
+    st.session_state.likes_automaticos_agregados = 0
 
-
-def mostrar_panel_notificaciones():
-    pass    
+mostrar_panel_notificaciones()
+st.markdown("---")
 
 # ============================================
 # SIDEBAR ADMIN
