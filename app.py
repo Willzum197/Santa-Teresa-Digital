@@ -30,7 +30,7 @@ supabase = init_supabase()
 # ============================================
 # URL DE LA IMAGEN DE FONDO
 # ============================================
-FONDO_URL = https://rkjkificbfpxtotjxqeb.supabase.co/storage/v1/object/public/imagenes/descarga.jpg
+FONDO_URL = "https://rkjkificbfpxtotjxqeb.supabase.co/storage/v1/object/public/imagenes/descarga.jpg"
 
 # ============================================
 # FUNCIÓN PARA DÓLAR
